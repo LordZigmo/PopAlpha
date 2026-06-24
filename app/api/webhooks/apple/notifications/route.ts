@@ -99,8 +99,9 @@ export async function POST(req: Request) {
   // Sanity check: bundle-id and environment are validated inside the
   // library against the configured verifier, but we still ensure the
   // inner txn environment matches a known value before persisting.
+  let environment: "sandbox" | "production";
   try {
-    narrowEnvironment(txn.environment as string | undefined);
+    environment = narrowEnvironment(txn.environment as string | undefined);
   } catch {
     console.warn("[iap/webhook] inner txn environment unrecognized", { env: txn.environment });
     return NextResponse.json({ ok: false, error: "Environment unrecognized." }, { status: 400 });
@@ -158,6 +159,9 @@ export async function POST(req: Request) {
         notification_type: notificationType,
         subtype: subtype ?? null,
         status,
+        // sandbox vs production — sandbox auto-renewals would otherwise
+        // inflate "active subscriptions"; filter to production for real revenue.
+        environment,
         product_id: subRow?.product_id ?? null,
         original_transaction_id: txn.originalTransactionId,
         expires_at: expiresAt?.toISOString() ?? null,

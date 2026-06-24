@@ -176,7 +176,50 @@ final class AnalyticsService {
         // for what gets captured and how to verify.
         config.errorTrackingConfig.autoCapture = true
 
+        // Tag EVERY event with platform + build channel via a beforeSend hook.
+        // It runs for all events — crucially including the lifecycle events
+        // (Application Installed / Updated / Opened) the SDK captures
+        // synchronously inside setup() — and it survives reset(). A register()
+        // super property can do neither: it can't run until after setup() (by
+        // which point the install/update event is already captured), and
+        // reset() wipes registered properties. Set BEFORE setup() so the
+        // lifecycle capture sees it. Filtering `platform = ios` AND
+        // `app_environment = appstore` then yields a clean "real iOS users"
+        // view; everything else is internal/test noise.
+        let appEnvironment = Self.appEnvironment
+        config.setBeforeSend { event in
+            event.properties["platform"] = "ios"
+            event.properties["app_environment"] = appEnvironment
+            return event
+        }
+
         PostHogSDK.shared.setup(config)
+    }
+
+    /// Build / distribution channel, attached to every event by the beforeSend
+    /// hook above so internal testing is filterable out of "real user" analytics:
+    ///   - "debug"      → built & run from Xcode (DEBUG configuration)
+    ///   - "testflight" → ad-hoc / TestFlight build (sandbox App Store receipt)
+    ///   - "appstore"   → production App Store build
+    ///   - "unknown"    → receipt URL nil/unrecognized (see below)
+    ///
+    /// Only an explicit production `receipt` path yields "appstore". A nil or
+    /// unrecognized receipt URL maps to "unknown", NOT "appstore" — sandbox /
+    /// TestFlight installs can be receiptless until the first purchase/restore,
+    /// and since this is computed once at launch, defaulting those to "appstore"
+    /// would leak internal/test sessions into the real-user view for the whole
+    /// run. "unknown" stays out of `app_environment = appstore` while being
+    /// honest about the ambiguity (a relaunch with a receipt present resolves it).
+    static var appEnvironment: String {
+        #if DEBUG
+        return "debug"
+        #else
+        switch Bundle.main.appStoreReceiptURL?.lastPathComponent {
+        case "receipt":        return "appstore"
+        case "sandboxReceipt": return "testflight"
+        default:               return "unknown"
+        }
+        #endif
     }
 
     // MARK: - Identity
@@ -195,6 +238,9 @@ final class AnalyticsService {
     /// Call on sign-out so subsequent events are attributed to a fresh
     /// anonymous distinct_id rather than leaking onto the previous user.
     func reset() {
+        // No need to re-tag here: the platform/app_environment beforeSend hook
+        // lives on the config (not in the storage reset() clears), so it keeps
+        // tagging events after sign-out automatically.
         PostHogSDK.shared.reset()
     }
 
