@@ -177,6 +177,36 @@ final class AnalyticsService {
         config.errorTrackingConfig.autoCapture = true
 
         PostHogSDK.shared.setup(config)
+
+        // Register super properties on EVERY event so analytics can separate
+        // (a) iOS from the web + server traffic that shares this PostHog
+        // project token, and (b) real App Store users from our own testing
+        // (Xcode / TestFlight — which is also where sandbox IAP happens).
+        // Filtering `platform = ios` AND `app_environment = appstore` yields a
+        // clean "real iOS users" view; everything else is internal/test noise.
+        PostHogSDK.shared.register([
+            "platform": "ios",
+            "app_environment": Self.appEnvironment,
+        ])
+    }
+
+    /// Build / distribution channel, surfaced as a PostHog super property so
+    /// internal testing is filterable out of "real user" analytics:
+    ///   - "debug"      → built & run from Xcode (DEBUG configuration)
+    ///   - "testflight" → ad-hoc / TestFlight build (sandbox App Store receipt)
+    ///   - "appstore"   → production App Store build
+    /// The sandbox-receipt check is Apple's documented runtime signal for a
+    /// TestFlight/sandbox build vs a production one — it keys on the build's
+    /// receipt path, not on whether a receipt file has been issued yet.
+    static var appEnvironment: String {
+        #if DEBUG
+        return "debug"
+        #else
+        if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
+            return "testflight"
+        }
+        return "appstore"
+        #endif
     }
 
     // MARK: - Identity
