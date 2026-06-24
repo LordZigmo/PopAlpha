@@ -1270,6 +1270,11 @@ export const PHASE2_DIRECT_PUBLIC_READ_TABLES = [
 ];
 
 export const PHASE2_INTERNAL_BASE_VIEW_TABLES = [
+  // Portfolio sparkline daily rollup (#302, migration 20260623210000). RLS-on,
+  // service-role only; the anon route reads it through the
+  // public_canonical_price_daily view — mirrors price_history_points /
+  // public_price_history_canonical. (RLS coverage is satisfied by membership here.)
+  "canonical_price_daily",
   "card_metrics",
   "graded_variant_prices",
   "graded_variant_prices_refresh_state",
@@ -1506,6 +1511,9 @@ export const AUTHENTICATED_SELECT_ONLY_OBJECTS = [
 ];
 
 export const PUBLIC_SELECT_ONLY_OBJECTS = [
+  // #302 sparkline public read surface — anon/authenticated SELECT only
+  // (granted in the migration), mirroring public_price_history_canonical.
+  "public_canonical_price_daily",
   "canonical_cards",
   "canonical_raw_provider_parity",
   "canonical_set_catalog",
@@ -1654,6 +1662,9 @@ export const SEQUENCE_GRANT_CONTRACTS = {
 };
 
 export const INTERNAL_NO_GRANT_OBJECTS = [
+  // #302 sparkline rollup base table — no anon/authenticated grants (revoked in
+  // the migration); the anon client reads via the public_canonical_price_daily view.
+  "canonical_price_daily",
   "ai_brief_cache",
   "homepage_cache",
   "apple_subscriptions",
@@ -1751,6 +1762,8 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
 ];
 
 export const PUBLIC_VIEW_NAMES = [
+  // #302 sparkline public read surface (view over canonical_price_daily).
+  "public_canonical_price_daily",
   "card_profile_coverage",
   "card_profile_failure_buckets",
   "canonical_set_catalog",
