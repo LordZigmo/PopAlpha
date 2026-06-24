@@ -28,8 +28,18 @@ export async function loadCardProfileSummary(slug: string): Promise<CardProfileS
   if (error) {
     throw new Error(`Failed reading card profile summary: ${error.message}`);
   }
+  if (!data) return null;
 
-  return data ?? null;
+  // Same read-time low-dollar neutralizer as loadCardProfileDetail — the
+  // server-rendered web /c/[slug] Pro card page reads the summary through THIS
+  // function, so it needs the override too or it keeps serving stale penny
+  // prose for already-poisoned rows.
+  if (isLowDollarProfile(await loadCurrentMarketPrice(supabase, slug))) {
+    const c = lowDollarProfileContent();
+    return { ...data, summary_short: c.summaryShort, summary_long: c.summaryLong };
+  }
+
+  return data;
 }
 
 /**

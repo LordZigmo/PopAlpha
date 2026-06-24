@@ -163,6 +163,11 @@ export type CardProfileResult = {
   //     rejected the shape
   //   - undefined            — source === "llm", no failure
   failureReason?: string;
+  // Set true when this is the deterministic low-dollar note (≤ the floor) — an
+  // INTENTIONAL non-LLM skip, NOT a failure. The cron uses it to exclude penny
+  // cards from the llm-degradation denominator (a batch of only low-dollar
+  // cards has zero LLM calls by design, not because the LLM broke).
+  lowDollarSkip?: boolean;
 };
 
 // ── Metrics hash ────────────────────────────────────────────────────────────
@@ -550,6 +555,7 @@ export function buildFallbackProfile(input: CardProfileInput): CardProfileResult
       inputTokens: null,
       outputTokens: null,
       metricsHash: buildMetricsHash(input),
+      lowDollarSkip: true,
     };
   }
 
