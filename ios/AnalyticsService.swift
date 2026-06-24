@@ -201,17 +201,24 @@ final class AnalyticsService {
     ///   - "debug"      → built & run from Xcode (DEBUG configuration)
     ///   - "testflight" → ad-hoc / TestFlight build (sandbox App Store receipt)
     ///   - "appstore"   → production App Store build
-    /// The sandbox-receipt check is Apple's documented runtime signal for a
-    /// TestFlight/sandbox build vs a production one — it keys on the build's
-    /// receipt path, not on whether a receipt file has been issued yet.
+    ///   - "unknown"    → receipt URL nil/unrecognized (see below)
+    ///
+    /// Only an explicit production `receipt` path yields "appstore". A nil or
+    /// unrecognized receipt URL maps to "unknown", NOT "appstore" — sandbox /
+    /// TestFlight installs can be receiptless until the first purchase/restore,
+    /// and since this is computed once at launch, defaulting those to "appstore"
+    /// would leak internal/test sessions into the real-user view for the whole
+    /// run. "unknown" stays out of `app_environment = appstore` while being
+    /// honest about the ambiguity (a relaunch with a receipt present resolves it).
     static var appEnvironment: String {
         #if DEBUG
         return "debug"
         #else
-        if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
-            return "testflight"
+        switch Bundle.main.appStoreReceiptURL?.lastPathComponent {
+        case "receipt":        return "appstore"
+        case "sandboxReceipt": return "testflight"
+        default:               return "unknown"
         }
-        return "appstore"
         #endif
     }
 
