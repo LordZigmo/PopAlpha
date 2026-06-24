@@ -176,32 +176,28 @@ final class AnalyticsService {
         // for what gets captured and how to verify.
         config.errorTrackingConfig.autoCapture = true
 
+        // Tag EVERY event with platform + build channel via a beforeSend hook.
+        // It runs for all events — crucially including the lifecycle events
+        // (Application Installed / Updated / Opened) the SDK captures
+        // synchronously inside setup() — and it survives reset(). A register()
+        // super property can do neither: it can't run until after setup() (by
+        // which point the install/update event is already captured), and
+        // reset() wipes registered properties. Set BEFORE setup() so the
+        // lifecycle capture sees it. Filtering `platform = ios` AND
+        // `app_environment = appstore` then yields a clean "real iOS users"
+        // view; everything else is internal/test noise.
+        let appEnvironment = Self.appEnvironment
+        config.setBeforeSend { event in
+            event.properties["platform"] = "ios"
+            event.properties["app_environment"] = appEnvironment
+            return event
+        }
+
         PostHogSDK.shared.setup(config)
-
-        // Register super properties on EVERY event so analytics can separate
-        // (a) iOS from the web + server traffic that shares this PostHog
-        // project token, and (b) real App Store users from our own testing
-        // (Xcode / TestFlight — which is also where sandbox IAP happens).
-        // Filtering `platform = ios` AND `app_environment = appstore` yields a
-        // clean "real iOS users" view; everything else is internal/test noise.
-        registerSuperProperties()
     }
 
-    /// Always-on super properties (platform + build channel) attached to every
-    /// captured event. Registered at setup AND re-registered after `reset()` —
-    /// PostHog's reset wipes registered super properties along with the rest of
-    /// local storage, so without this, events after a sign-out (and any
-    /// re-sign-in within the same app run) would silently lose `platform` /
-    /// `app_environment` and fall out of the new filters until the next launch.
-    private func registerSuperProperties() {
-        PostHogSDK.shared.register([
-            "platform": "ios",
-            "app_environment": Self.appEnvironment,
-        ])
-    }
-
-    /// Build / distribution channel, surfaced as a PostHog super property so
-    /// internal testing is filterable out of "real user" analytics:
+    /// Build / distribution channel, attached to every event by the beforeSend
+    /// hook above so internal testing is filterable out of "real user" analytics:
     ///   - "debug"      → built & run from Xcode (DEBUG configuration)
     ///   - "testflight" → ad-hoc / TestFlight build (sandbox App Store receipt)
     ///   - "appstore"   → production App Store build
@@ -235,10 +231,10 @@ final class AnalyticsService {
     /// Call on sign-out so subsequent events are attributed to a fresh
     /// anonymous distinct_id rather than leaking onto the previous user.
     func reset() {
+        // No need to re-tag here: the platform/app_environment beforeSend hook
+        // lives on the config (not in the storage reset() clears), so it keeps
+        // tagging events after sign-out automatically.
         PostHogSDK.shared.reset()
-        // reset() wipes registered super properties — re-apply so events after
-        // a sign-out (and any subsequent re-sign-in this run) stay tagged.
-        registerSuperProperties()
     }
 
     // MARK: - Capture
