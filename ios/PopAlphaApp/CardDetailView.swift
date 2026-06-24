@@ -65,11 +65,15 @@ func selectNearMintHeroPrice(
             return price
         }
     }
-    // EN-RAW hero = the freshest snapshot point (latest_price). The view
-    // already guards it (null when suppressed) and falls back to the median
-    // basis, so this is the freshest when we have one, else the 3-day median.
-    if let latestPrice, latestPrice > 0 { return latestPrice }
+    // EN-RAW hero = the blended Market Price (market_price) — the SAME basis the
+    // AI Market Brief leads with ("Market Price is the only current price") and
+    // the web header shows via resolveDisplayedMarketPrice, so the hero number
+    // and the brief can never disagree on the same screen. The freshest single
+    // point moves to a clearly-labeled "Latest sale" subline (see
+    // medianSublineText). Fall back to the freshest point only when there's no
+    // Market Price yet, then to the card's headline price.
     if let marketPrice, marketPrice > 0 { return marketPrice }
+    if let latestPrice, latestPrice > 0 { return latestPrice }
     if activeCardPrice > 0 { return activeCardPrice }
     if let chartFallbackPrice, chartFallbackPrice > 0 { return chartFallbackPrice }
     return nil
@@ -295,14 +299,13 @@ struct CardDetailView: View {
         return price > 0 && price <= abundantRawCardMaxUsd
     }
 
-    /// The 3-day median shown directly below the freshest hero price for
-    /// EN-RAW cards. The hero (above) is the freshest daily point; this is the
-    /// steadier 3-day median that the newest point already folds into — two
-    /// distinct values, one per line, neither competing for the hero spot.
-    /// Because cardMetrics becomes the per-printing row once a finish is
-    /// selected, both track the chosen finish. JP renders its own 14-day
-    /// median (or low-sample observation count); nil for graded mode
-    /// (separate path), low-dollar EN cards, and when no median is available.
+    /// Secondary price line under the hero. EN-RAW: the hero (above) now leads
+    /// with the blended Market Price (matching the AI brief + web), so this line
+    /// surfaces the freshest individual sale — "Latest sale: $X · 2 days ago" —
+    /// the live point, clearly labeled so it never competes as "the price".
+    /// JP keeps its own 14-day median (or low-sample observation count) under the
+    /// JP freshest hero. nil for graded mode (separate path), low-dollar EN
+    /// cards, and when there's no distinct secondary value to show.
     private var medianSublineText: String? {
         // Graded mode first, for EVERY language: the graded hero comes from
         // the graded metric rows (a separate fetch), so any RAW-basis median
@@ -331,9 +334,17 @@ struct CardDetailView: View {
             return "14-day median: \(f)"
         }
         guard !isAbundantNearMintHeroPrice else { return nil }
-        guard let median = cardMetrics?.marketPrice, median > 0 else { return nil }
-        let formatted = median >= 1000 ? String(format: "$%.0f", median) : String(format: "$%.2f", median)
-        return "3-day median: \(formatted)"
+        // Freshest individual sale, shown beneath the Market Price hero. Only
+        // when it exists AND differs from the hero (else it would just echo the
+        // headline). formatYahooJpObservedAt is a generic relative-age formatter
+        // (also used for "Last Refreshed"); the JP name is historical.
+        guard let latest = cardMetrics?.latestPrice, latest > 0 else { return nil }
+        guard let market = cardMetrics?.marketPrice, market > 0, abs(latest - market) >= 0.01 else { return nil }
+        let formatted = latest >= 1000 ? String(format: "$%.0f", latest) : String(format: "$%.2f", latest)
+        if let asOf = cardMetrics?.latestPriceAsOf {
+            return "Latest sale: \(formatted) · \(formatYahooJpObservedAt(asOf))"
+        }
+        return "Latest sale: \(formatted)"
     }
 
     /// Source label shown next to the hero price so the user knows
@@ -1384,9 +1395,10 @@ struct CardDetailView: View {
                 }
             }
 
-            // 3-day median, directly below the freshest hero. Shown for EN-RAW
-            // (and the selected finish) so the user sees live-vs-trend without
-            // two numbers fighting for the hero spot.
+            // Secondary price line under the hero: EN-RAW shows the freshest
+            // "Latest sale" beneath the Market Price hero; JP shows its 14-day
+            // median. Two distinct values, one per line, neither competing for
+            // the hero spot.
             if let medianText = medianSublineText {
                 Text(medianText)
                     .font(PA.Typography.caption)
