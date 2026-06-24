@@ -98,6 +98,17 @@ enum AnalyticsEvent: String {
     case paywallDismissed = "paywall_dismissed"
     case paywallRestoreSucceeded = "paywall_restore_succeeded"
     case paywallPurchaseFailed = "paywall_purchase_failed"
+    // Sign-in gate in front of purchase: a guest tapped Subscribe, so we
+    // require sign-in before handing off to StoreKit. Apple subscriptions
+    // must attach to a PopAlpha account — a guest purchase 401s at
+    // /api/iap/verify and is never recorded server-side. Carries `surface`.
+    case paywallSignInRequired = "paywall_signin_required"
+    // Client-side counterpart to the server's subscription_verified_server:
+    // StoreKit granted Pro locally but /api/iap/verify did NOT confirm it.
+    // Carries `reason` (unauthorized / not_entitled / failed) + `surface`.
+    // A nonzero rate here means users are Pro on-device but unknown to the
+    // server — the exact discrepancy that used to be swallowed silently.
+    case subscriptionVerifyFailedClient = "subscription_verify_failed_client"
 
     // Market Brief (3 free) vs Collector Insight (Pro-only) funnel.
     // paywall_from_collector_insight is captured via the paywall_viewed
