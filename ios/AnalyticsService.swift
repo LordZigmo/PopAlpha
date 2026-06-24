@@ -184,6 +184,16 @@ final class AnalyticsService {
         // (Xcode / TestFlight — which is also where sandbox IAP happens).
         // Filtering `platform = ios` AND `app_environment = appstore` yields a
         // clean "real iOS users" view; everything else is internal/test noise.
+        registerSuperProperties()
+    }
+
+    /// Always-on super properties (platform + build channel) attached to every
+    /// captured event. Registered at setup AND re-registered after `reset()` —
+    /// PostHog's reset wipes registered super properties along with the rest of
+    /// local storage, so without this, events after a sign-out (and any
+    /// re-sign-in within the same app run) would silently lose `platform` /
+    /// `app_environment` and fall out of the new filters until the next launch.
+    private func registerSuperProperties() {
         PostHogSDK.shared.register([
             "platform": "ios",
             "app_environment": Self.appEnvironment,
@@ -226,6 +236,9 @@ final class AnalyticsService {
     /// anonymous distinct_id rather than leaking onto the previous user.
     func reset() {
         PostHogSDK.shared.reset()
+        // reset() wipes registered super properties — re-apply so events after
+        // a sign-out (and any subsequent re-sign-in this run) stay tagged.
+        registerSuperProperties()
     }
 
     // MARK: - Capture
