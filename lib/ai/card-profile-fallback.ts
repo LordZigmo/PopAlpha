@@ -10,6 +10,7 @@
 import crypto from "node:crypto";
 
 import { getPopAlphaCardProfileModelId } from "@/lib/ai/model-config";
+import { ABUNDANT_RAW_CARD_MAX_USD } from "@/lib/pricing/displayed-market-price";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -34,6 +35,57 @@ export const VERDICTS = [
   "INSUFFICIENT_DATA",
 ] as const;
 export type Verdict = (typeof VERDICTS)[number];
+
+// ── Low-dollar floor ─────────────────────────────────────────────────────────
+//
+// Cards at or below this price have markets too thin to narrate — a few cents
+// reads as a huge % swing, and the cached LLM summary routinely froze a stale
+// (sometimes contaminated) price (e.g. a $0.01 card serving "$0.86, -50%").
+// Below the floor we emit a deterministic, honest note instead of a mover
+// narrative — for EVERY generation path (cron, inline, LLM-fallback) and at
+// read time (lib/card-profiles.ts neutralizes already-cached penny narratives
+// with the identical content). One threshold, shared with the iOS hero's
+// "Low-dollar card" treatment (ABUNDANT_RAW_CARD_MAX_USD).
+export const LOW_DOLLAR_PROFILE_MAX_USD = ABUNDANT_RAW_CARD_MAX_USD;
+
+export function isLowDollarProfile(marketPrice: number | null | undefined): boolean {
+  return (
+    typeof marketPrice === "number" &&
+    Number.isFinite(marketPrice) &&
+    marketPrice > 0 &&
+    marketPrice <= LOW_DOLLAR_PROFILE_MAX_USD
+  );
+}
+
+const LOW_DOLLAR_SUMMARY_SHORT =
+  `Low-dollar card — under $${LOW_DOLLAR_PROFILE_MAX_USD}, the market's too thin to read a reliable trend, ` +
+  `so we show the latest price rather than a signal.`;
+const LOW_DOLLAR_SUMMARY_LONG =
+  `${LOW_DOLLAR_SUMMARY_SHORT} At these levels a few cents reads as a big percentage swing, ` +
+  `so we don't call a move we can't stand behind.`;
+
+/**
+ * Deterministic content for a low-dollar (≤ LOW_DOLLAR_PROFILE_MAX_USD) card.
+ * Shared by the generation funnel (buildFallbackProfile) and the read-time
+ * neutralizer (loadCardProfileDetail) so a penny card reads identically whether
+ * its row was just generated or is a stale pre-floor cache. Neutral signal +
+ * INSUFFICIENT_DATA verdict so no trend badge or move call is implied.
+ */
+export function lowDollarProfileContent(): {
+  signalLabel: SignalLabel;
+  verdict: Verdict;
+  chip: string;
+  summaryShort: string;
+  summaryLong: string;
+} {
+  return {
+    signalLabel: "STEADY",
+    verdict: "INSUFFICIENT_DATA",
+    chip: "💵 Low-dollar",
+    summaryShort: LOW_DOLLAR_SUMMARY_SHORT,
+    summaryLong: LOW_DOLLAR_SUMMARY_LONG,
+  };
+}
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -481,6 +533,26 @@ function buildTierFlavoredWatch(input: CardProfileInput, tier: FallbackTier): st
 }
 
 export function buildFallbackProfile(input: CardProfileInput): CardProfileResult {
+  // Low-dollar floor: the single funnel every path runs through (cron, inline
+  // ensureMarketSignal, and the LLM path's fallback). A sub-$2 card gets the
+  // deterministic honest note instead of a mover narrative — no fabricated
+  // "80% decrease / fair valuation" on a nickel card.
+  if (isLowDollarProfile(input.marketPrice)) {
+    const c = lowDollarProfileContent();
+    return {
+      signalLabel: c.signalLabel,
+      verdict: c.verdict,
+      chip: c.chip,
+      summaryShort: c.summaryShort,
+      summaryLong: c.summaryLong,
+      source: "fallback",
+      modelLabel: CARD_PROFILE_MODEL_LABEL,
+      inputTokens: null,
+      outputTokens: null,
+      metricsHash: buildMetricsHash(input),
+    };
+  }
+
   const signal = pickSignal(input);
   const verdict = pickVerdict(input, signal);
   const tier = identifyFallbackTier(input);

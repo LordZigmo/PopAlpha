@@ -12,6 +12,7 @@ import { geminiThinkingConfigForModel } from "@/lib/ai/model-config";
 import {
   buildFallbackProfile,
   buildMetricsHash,
+  isLowDollarProfile,
   CARD_PROFILE_MODEL_LABEL,
   priceTrackingBucket,
   SIGNAL_LABELS,
@@ -219,6 +220,12 @@ export async function generateCardProfile(
 ): Promise<CardProfileResult> {
   const modelLabel = getCardProfileModelLabelForInput(input);
   const fallbackProfile = { ...buildFallbackProfile(input), modelLabel };
+  // Low-dollar cards already got the deterministic low-dollar note from
+  // buildFallbackProfile — skip the LLM entirely (no point paying Gemini to
+  // narrate a sub-$2 card; the note is the honest read).
+  if (isLowDollarProfile(input.marketPrice)) {
+    return fallbackProfile;
+  }
   const metricsHash = fallbackProfile.metricsHash;
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), CARD_PROFILE_TIMEOUT_MS);
