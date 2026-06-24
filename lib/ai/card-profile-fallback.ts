@@ -148,7 +148,10 @@ export type CardProfileResult = {
   chip: string;
   summaryShort: string;
   summaryLong: string;
-  source: "llm" | "fallback";
+  // "low_dollar" is the deterministic ≤$2 note — a DISTINCT persisted state, not
+  // "fallback", so the refresh RPC's `existing_source = 'fallback'` reselection
+  // doesn't churn these skips forever and starve real >$2 refreshes.
+  source: "llm" | "fallback" | "low_dollar";
   modelLabel: string;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -550,7 +553,7 @@ export function buildFallbackProfile(input: CardProfileInput): CardProfileResult
       chip: c.chip,
       summaryShort: c.summaryShort,
       summaryLong: c.summaryLong,
-      source: "fallback",
+      source: "low_dollar",
       modelLabel: CARD_PROFILE_MODEL_LABEL,
       inputTokens: null,
       outputTokens: null,

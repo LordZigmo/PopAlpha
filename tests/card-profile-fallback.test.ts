@@ -93,7 +93,7 @@ export async function runCardProfileFallbackTests() {
     const result = buildFallbackProfile(
       makeInput({ canonicalName: "Patrat", marketPrice: 0.30, rarity: "Common", setName: "Sword & Shield" }),
     );
-    assert.equal(result.source, "fallback");
+    assert.equal(result.source, "low_dollar");
     assert.match(result.summaryShort, /Low-dollar card/);
     assert.match(result.summaryShort, /too thin/);
     assert.equal(result.signalLabel, "STEADY");
@@ -191,7 +191,7 @@ export async function runCardProfileFallbackTests() {
         changePct7d: 25,
       }),
     );
-    assert.equal(result.source, "fallback");
+    assert.equal(result.source, "low_dollar");
     assert.match(result.summaryShort, /Low-dollar card/);
     assert.doesNotMatch(result.summaryLong, /\+25%|strong move|BREAKOUT|bulk-tier/);
     assert.equal(result.signalLabel, "STEADY");
@@ -223,7 +223,7 @@ export async function runCardProfileFallbackTests() {
 
   {
     const result = buildFallbackProfile(makeInput());
-    assert.equal(result.source, "fallback");
+    assert.equal(result.source, "low_dollar");
     assert.equal(result.modelLabel, CARD_PROFILE_MODEL_LABEL);
     assert.equal(result.inputTokens, null);
     assert.equal(result.outputTokens, null);
