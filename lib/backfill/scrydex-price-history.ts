@@ -1871,10 +1871,17 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
       }
 
       for (const variant of target.variants) {
-        // Only an explicitly-resolved EN flips to `market`; JP/other AND
-        // any unresolved slug keep `low` — matching the conservative
-        // function-level default (preferLow defaults true everywhere).
-        const preferLow = languageBySlug.get(variant.canonicalSlug) !== "EN";
+        // Prefer `low` ONLY for an explicit non-EN language ('JP', …).
+        // 'EN', NULL, and unmapped slugs are all EN-managed → `market`,
+        // matching the daily normalizer (absent language defaults to EN)
+        // and the EN/JP writer partition, which excludes only
+        // language = 'JP' and documents "rows missing from canonical_cards
+        // (or with NULL language) stay EN-managed"
+        // (migration 20260612014500_refresh_price_changes_core_excludes_jp).
+        // JP rows are ALWAYS explicitly tagged 'JP', so none hide in the
+        // NULL/unmapped bucket — keeping hero and history in lockstep.
+        const resolvedLanguage = languageBySlug.get(variant.canonicalSlug);
+        const preferLow = resolvedLanguage != null && resolvedLanguage !== "EN";
         const resolvedHistory = resolveScrydexRawHistoryDays({
           historyDays,
           providerVariantToken: variant.providerVariantToken,
