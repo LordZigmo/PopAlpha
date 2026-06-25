@@ -379,6 +379,13 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
   const variants = card.variants ?? [];
   const results: VariantObservation[] = [];
 
+  // EN-RAW headline tracks scrydex `market` (sold-anchored, mirrors the
+  // PriceCharting trusted feed); JP/other keeps `low`. The per-condition
+  // `low` field episodically latches onto a junk listing in either
+  // direction for EN — see parseScrydexPriceObject docs + lockstep mirror
+  // in scrydex-price-history.ts. preferLow=true for everything non-EN.
+  const preferLow = normalizeProviderLanguageToCanonical(card.language_code) !== "EN";
+
   const RAW_DEFAULTS = {
     grade: "RAW" as const,
     gradedProvider: null,
@@ -390,7 +397,7 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
 
   if (variants.length === 0) {
     const prices = (card as { prices?: unknown }).prices;
-    const pricingSelection = selectPreferredScrydexPriceEntry(prices);
+    const pricingSelection = selectPreferredScrydexPriceEntry(prices, { preferLow });
     if (pricingSelection) {
       const semantics = parseScrydexVariantSemantics("unknown");
       results.push({
@@ -450,7 +457,7 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
     const variantName = String((variant as ScrydexVariant).name ?? "unknown").trim() || "unknown";
     const variantId = variantName.replace(/\s+/g, "_").toLowerCase();
     const variantPrices = (variant as ScrydexVariant).prices;
-    const pricingSelection = selectPreferredScrydexPriceEntry(variantPrices);
+    const pricingSelection = selectPreferredScrydexPriceEntry(variantPrices, { preferLow });
 
     if (pricingSelection) {
       const semantics = parseScrydexVariantSemantics(variantName);
@@ -608,11 +615,13 @@ function buildObservationRow(params: {
       isPerfect: variant.isPerfect,
       lowPrice: variant.lowPrice,
       highPrice: variant.highPrice,
-      // Phase C-2 (2026-05-16): asking-anchored value (USD) preserved
+      // Phase C-2 (2026-05-16): scrydex `market` (USD) preserved
       // separately so the card detail page can render "Asking: $X"
-      // alongside the headline (which after Phase A tracks scrydex
-      // `low`). Read by app/c/[slug]/page.tsx via the latest scrydex
-      // observation. Null on graded observations.
+      // alongside the headline. Read by app/c/[slug]/page.tsx via the
+      // latest scrydex observation. Null on graded observations. NOTE
+      // (2026-06-25): for EN-RAW the headline now ALSO tracks `market`
+      // (observed_price), so this equals the headline for EN; it still
+      // diverges for JP-RAW, whose headline tracks `low`.
       scrydexAskingPriceUsd: variant.askingPriceUsd,
     },
     updated_at: normalizedAt,

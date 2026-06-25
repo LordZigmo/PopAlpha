@@ -48,27 +48,39 @@ export function normalizeScrydexCurrency(raw: unknown): ScrydexCurrency {
  * Parse a Scrydex `prices[]` row to a single (price, currency) tuple.
  *
  * `preferLow` (default false): when true, prefer the row's `low` field
- * over `market` for the price value. This matters because scrydex's
- * `market` field is asking-anchored — it weights recent high listings —
- * while TCGplayer's published "Market Price" label is sold-anchored
- * (recent-sold median), and the two diverge significantly on
- * thin-liquidity cards (e.g. Pokemon GO Japan #084 Mewtwo VSTAR: scrydex
- * `market` ¥7,500 = $50 USD, but TCGplayer shows $29.77; scrydex `low`
- * ¥4,300 ≈ $28.67 matches the TCGplayer label). When users compare our
- * displayed price to TCGplayer's page, `low` is the field that aligns
- * with what TCGplayer publishes.
+ * over `market` for the price value.
  *
- * Raw NM/Mint pricing should pass `preferLow: true` so the headline
- * tracks TCGplayer's published number. Graded pricing should leave it
- * false — for graded, scrydex's `market` is the conventional "value"
- * estimate the market uses (median of recent sales of that specific
- * graded SKU), and switching to `low` would silently surface the
- * cheapest current asking of that slab.
+ * THE FIELD CHOICE IS LANGUAGE-DEPENDENT (callers decide; see
+ * `selectPreferredScrydexPriceEntry` + `selectScrydexRawHistoryPrice`):
  *
- * Discovered via 5-card spot-check 2026-05-15 (Mewtwo VSTAR, Grusha,
- * Manaphy, Darkrai, Quaquaval ex). 2 of 4 testable cards diverged
- * meaningfully (-39% Grusha, -42% Mewtwo VSTAR); Manaphy was within
- * $3. Pattern: divergence proportional to scrydex's high/low spread.
+ *   - EN raw → prefer `market` (`preferLow: false`). For the EN/global
+ *     (TCGplayer-backed) feed, scrydex's `market` is the sold-anchored
+ *     "Market Price" the rest of the trusted UI should mirror, and it
+ *     tracks PriceCharting's trusted feed closely (market/PriceCharting
+ *     ≈ 0.99 median vs low/PriceCharting ≈ 0.60). The per-condition
+ *     `low` field is the cheapest current *ask*, which episodically
+ *     latches onto a junk listing in BOTH directions — spiking HIGH
+ *     (Electrode-GX FA #155 $131.90 vs trusted $10.31) and cratering
+ *     LOW (Chaos Rising #55 Krookodile-ex NM `low` $0.05 while its own
+ *     NM `market` is $0.45 and PriceCharting is $1.56). Promoting
+ *     `market` for EN removes that whole class of contamination
+ *     (2026-06-25; see project_pricing_trust_hardening).
+ *
+ *   - JP raw → prefer `low` (`preferLow: true`). For the JP feed the
+ *     relationship inverts: scrydex's JP `market` is asking-anchored and
+ *     overshoots what the JP market actually clears (Pokemon GO Japan
+ *     #084 Mewtwo VSTAR: `market` ¥7,500 ≈ $50, but the card clears
+ *     nearer `low` ¥4,300 ≈ $28.67). JP keeps `low` as the headline.
+ *
+ *   - Graded (any language) → prefer `market` (`preferLow: false`):
+ *     scrydex's `market` is the conventional "value" estimate (median of
+ *     recent sales of that specific slab); `low` would surface the
+ *     cheapest current asking.
+ *
+ * History: the old default was `preferLow: true` catalog-wide, on the
+ * belief that `low` mirrored TCGplayer's published number — derived from
+ * a 5-card JP-leaning spot-check (2026-05-15). That belief is INVERTED
+ * for EN; the EN flip to `market` landed 2026-06-25.
  */
 export function parseScrydexPriceObject(
   record: Record<string, unknown>,
@@ -146,7 +158,17 @@ export function normalizeScrydexCondition(condition: unknown): {
  * When nothing qualifies we return `null` — callers must skip the observation
  * rather than fabricating a substitute from a non-qualifying row.
  */
-export function selectPreferredScrydexPriceEntry(prices: unknown): SelectedScrydexPriceEntry | null {
+export function selectPreferredScrydexPriceEntry(
+  prices: unknown,
+  options: { preferLow?: boolean } = {},
+): SelectedScrydexPriceEntry | null {
+  // Default `preferLow: true` preserves the legacy JP/unknown-language
+  // behavior for any caller that doesn't pass it. The live normalize
+  // callers (pokemontcg-raw-normalize.ts) pass the language-derived value
+  // explicitly: EN → false (prefer `market`), JP/other → true (prefer
+  // `low`). See parseScrydexPriceObject docs for why the choice flips by
+  // language. Must stay in lockstep with selectScrydexRawHistoryPrice.
+  const preferLow = options.preferLow ?? true;
   const rows: Record<string, unknown>[] = Array.isArray(prices)
     ? prices.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
     : (prices && typeof prices === "object" ? [prices as Record<string, unknown>] : []);
@@ -162,16 +184,21 @@ export function selectPreferredScrydexPriceEntry(prices: unknown): SelectedScryd
     const condition = normalizeScrydexCondition(row.condition);
     if (condition.normalizedCondition !== "nm" && condition.normalizedCondition !== "mint") continue;
 
-    // Raw NM/Mint headline price tracks scrydex's `low` to match TCGplayer's
-    // published "Market Price" label (sold-anchored). See parseScrydexPriceObject docs.
-    const parsed = parseScrydexPriceObject(row, { preferLow: true });
+    const parsed = parseScrydexPriceObject(row, { preferLow });
     if (parsed.price === null) continue;
 
     let score = 0;
     if (condition.normalizedCondition === "nm") score += 100;
     if (condition.normalizedCondition === "mint") score += 90;
-    if (getNumberField(row.low) !== null) score += 20;
-    if (getNumberField(row.market) !== null) score += 10;
+    // Tiebreak weights the preferred field higher so the row carrying it
+    // wins when multiple NM/Mint rows qualify. Mirrors `preferLow`.
+    if (preferLow) {
+      if (getNumberField(row.low) !== null) score += 20;
+      if (getNumberField(row.market) !== null) score += 10;
+    } else {
+      if (getNumberField(row.market) !== null) score += 20;
+      if (getNumberField(row.low) !== null) score += 10;
+    }
 
     const selected: SelectedScrydexPriceEntry = {
       price: parsed.price,

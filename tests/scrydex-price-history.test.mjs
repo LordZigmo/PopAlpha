@@ -451,14 +451,48 @@ async function runScrydexPriceHistoryTests() {
       currency: "USD",
     },
   ], "pokemoncenterstamp");
-  // Post 2026-05-15: raw history now prefers `low` over `market` to track
-  // TCGplayer's published Market Price label. See scrydex-raw-price-select.ts
-  // parseScrydexPriceObject docs. For this fixture, low=180 wins over market=145.53.
+  // DEFAULT path (no preferLow option) = JP/legacy behavior: prefers `low`.
+  // For this fixture, low=180 wins over market=145.53. The live EN history
+  // path passes preferLow=false (prefers `market`) — covered just below.
+  // See scrydex-raw-price-select.ts parseScrydexPriceObject docs.
   assert.deepEqual(stamped, {
     price: 180,
     currency: "USD",
     condition: "nm",
   });
+
+  // EN-RAW (2026-06-25 flip): same fixture under preferLow:false surfaces
+  // `market` (145.53), not `low` (180). Lockstep with the daily normalize
+  // path's selectPreferredScrydexPriceEntry.
+  const stampedEn = selectScrydexRawHistoryPrice([
+    {
+      variant: "pokemonCenterStamp",
+      condition: "NM",
+      type: "raw",
+      low: 180,
+      market: 145.53,
+      currency: "USD",
+    },
+  ], "pokemoncenterstamp", { preferLow: false });
+  assert.deepEqual(stampedEn, {
+    price: 145.53,
+    currency: "USD",
+    condition: "nm",
+  });
+
+  // EN junk-LOW regression (Krookodile-ex shape): low=0.05 is junk; EN must
+  // surface market=0.45.
+  const krookodileEn = selectScrydexRawHistoryPrice([
+    {
+      variant: "normal",
+      condition: "NM",
+      type: "raw",
+      low: 0.05,
+      market: 0.45,
+      currency: "USD",
+    },
+  ], "normal", { preferLow: false });
+  assert.equal(krookodileEn?.price, 0.45, "EN history must surface market ($0.45), not junk low ($0.05)");
 
   const noNearMint = selectScrydexRawHistoryPrice([
     {
@@ -553,6 +587,35 @@ async function runScrydexPriceHistoryTests() {
       source: "provider",
     },
   ]);
+
+  // EN-RAW resolveScrydexRawHistoryDays: preferLow:false picks `market` on a
+  // row that has both, confirming the per-day selection flips for EN.
+  const resolvedHistoryEn = resolveScrydexRawHistoryDays({
+    historyDays: [
+      {
+        date: "2026/03/25",
+        prices: [
+          {
+            variant: "normal",
+            condition: "NM",
+            type: "raw",
+            low: 0.05,
+            market: 0.45,
+            currency: "USD",
+          },
+        ],
+      },
+    ],
+    providerVariantToken: "normal",
+    windowDays: 1,
+    asOf: "2026-03-25T18:00:00.000Z",
+    preferLow: false,
+  });
+  assert.equal(
+    resolvedHistoryEn.days.at(-1)?.selected?.price,
+    0.45,
+    "EN history day must surface `market` ($0.45), not junk `low` ($0.05)",
+  );
 
   assert.equal(isRetryableHistoryWriteErrorMessage("TypeError: fetch failed"), true);
   assert.equal(isRetryableHistoryWriteErrorMessage("statement timeout"), true);

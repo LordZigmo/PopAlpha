@@ -475,7 +475,13 @@ export function resolveScrydexRawHistoryDays(params: {
   providerVariantToken: string;
   windowDays: number;
   asOf?: Date | string | number;
+  // EN → false (prefer `market`), JP/other → true (prefer `low`).
+  // Defaults true to preserve legacy behavior for callers that don't pass
+  // it. Must stay in lockstep with selectPreferredScrydexPriceEntry in the
+  // daily normalize path. See parseScrydexPriceObject docs.
+  preferLow?: boolean;
 }): ResolvedScrydexHistoryDaySet {
+  const preferLow = params.preferLow ?? true;
   const actualDayKeys = new Set<string>();
   const pricesByDayKey = new Map<string, ScrydexPriceHistoryEntry[]>();
 
@@ -497,7 +503,7 @@ export function resolveScrydexRawHistoryDays(params: {
 
   for (const dayKey of orderedDayKeys) {
     const directSelected = actualDayKeys.has(dayKey)
-      ? selectScrydexRawHistoryPrice(pricesByDayKey.get(dayKey) ?? [], params.providerVariantToken)
+      ? selectScrydexRawHistoryPrice(pricesByDayKey.get(dayKey) ?? [], params.providerVariantToken, { preferLow })
       : null;
 
     if (directSelected) {
@@ -537,14 +543,17 @@ export function providerVariantIdToScrydexToken(providerVariantId: string): stri
   return normalizeScrydexVariantToken(rawVariant);
 }
 
-function getPositivePrice(entry: ScrydexPriceHistoryEntry): number | null {
-  // Raw-history price selection. Prefer `low` over `market` to match
-  // TCGplayer's published "Market Price" label (sold-anchored). See
+function getPositivePrice(entry: ScrydexPriceHistoryEntry, preferLow: boolean): number | null {
+  // Raw-history price selection. The field order is language-dependent
+  // (caller decides): EN → `market` first (sold-anchored, mirrors the
+  // PriceCharting trusted feed), JP/other → `low` first. See
   // parseScrydexPriceObject docs in scrydex-raw-price-select.ts. Used
   // only by selectScrydexRawHistoryPrice (raw-only path); graded
   // history goes through selectScrydexGradedEntries which keeps
   // `market` as the headline by design.
-  const candidates = [entry.low, entry.market, entry.mid, entry.high];
+  const candidates = preferLow
+    ? [entry.low, entry.market, entry.mid, entry.high]
+    : [entry.market, entry.low, entry.mid, entry.high];
   for (const candidate of candidates) {
     if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0) {
       return candidate;
@@ -556,7 +565,12 @@ function getPositivePrice(entry: ScrydexPriceHistoryEntry): number | null {
 export function selectScrydexRawHistoryPrice(
   prices: ScrydexPriceHistoryEntry[] | null | undefined,
   providerVariantToken: string,
+  options: { preferLow?: boolean } = {},
 ): SelectedRawHistoryPrice | null {
+  // EN → false (prefer `market`), JP/other → true (prefer `low`). Default
+  // true preserves legacy behavior; must stay in lockstep with
+  // selectPreferredScrydexPriceEntry. See parseScrydexPriceObject docs.
+  const preferLow = options.preferLow ?? true;
   const normalizedVariantToken = normalizeScrydexVariantToken(providerVariantToken);
   if (!normalizedVariantToken || !Array.isArray(prices) || prices.length === 0) return null;
 
@@ -573,17 +587,24 @@ export function selectScrydexRawHistoryPrice(
     const normalizedCondition = normalizeCondition(String(row.condition ?? ""));
     if (normalizedCondition !== "nm" && normalizedCondition !== "mint") continue;
 
-    const price = getPositivePrice(row);
+    const price = getPositivePrice(row, preferLow);
     if (price === null) continue;
 
+    const lowOk = typeof row.low === "number" && Number.isFinite(row.low) && row.low > 0;
+    const marketOk = typeof row.market === "number" && Number.isFinite(row.market) && row.market > 0;
     let score = 0;
     if (normalizedCondition === "nm") score += 100;
     if (normalizedCondition === "mint") score += 90;
-    // Raw-row tiebreak: weight `low` higher than `market` so rows with `low`
-    // populated win when multiple raw NM rows are present. Mirrors the
-    // preferLow=true ordering in parseScrydexPriceObject for raw paths.
-    if (typeof row.low === "number" && Number.isFinite(row.low) && row.low > 0) score += 20;
-    if (typeof row.market === "number" && Number.isFinite(row.market) && row.market > 0) score += 10;
+    // Raw-row tiebreak: weight the preferred field higher so rows carrying
+    // it win when multiple raw NM rows are present. Mirrors the field order
+    // in parseScrydexPriceObject (preferLow) for the daily normalize path.
+    if (preferLow) {
+      if (lowOk) score += 20;
+      if (marketOk) score += 10;
+    } else {
+      if (marketOk) score += 20;
+      if (lowOk) score += 10;
+    }
 
     const selected: SelectedRawHistoryPrice = {
       price,
@@ -668,6 +689,37 @@ function buildScrydexCardHistoryTargets(rows: ProviderCardMapSummaryRow[]): Scry
   }
 
   return [...byCardId.values()].sort((left, right) => left.providerCardId.localeCompare(right.providerCardId));
+}
+
+/**
+ * Load canonical language ("EN"/"JP"/…) for a set of canonical slugs.
+ * provider_card_map carries no language column, so the raw-history
+ * field-selection (EN → `market`, JP/other → `low`) needs this lookup to
+ * stay in lockstep with the daily normalize path, which derives the same
+ * decision from card.language_code. Slugs not found default to "EN" at the
+ * call site (the dominant, market-preferring case).
+ */
+async function loadCanonicalLanguageBySlug(slugs: string[]): Promise<Map<string, string>> {
+  const distinct = normalizeStringList(slugs);
+  const bySlug = new Map<string, string>();
+  if (distinct.length === 0) return bySlug;
+  const supabase = dbAdmin();
+  // 200-slug chunks: PostgREST IN-list with ~1000 36-char slugs blows past
+  // Vercel's URL limit (same ceiling as the dormant-tier load above).
+  for (const slugChunk of chunkValues(distinct, 200)) {
+    const { data, error } = await supabase
+      .from("canonical_cards")
+      .select("slug, language")
+      .in("slug", slugChunk)
+      .returns<Array<{ slug: string | null; language: string | null }>>();
+    if (error) throw new Error(`canonical_cards(load languages): ${error.message}`);
+    for (const row of data ?? []) {
+      const slug = normalizeText(row.slug);
+      const language = normalizeText(row.language).toUpperCase();
+      if (slug && language) bySlug.set(slug, language);
+    }
+  }
+  return bySlug;
 }
 
 async function loadMatchedProviderCardMapRows(providerSetIds?: string[]): Promise<ProviderCardMapSummaryRow[]> {
@@ -1773,6 +1825,9 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
   const canonicalSlugs = normalizeStringList(
     allTargets.flatMap((target) => target.variants.map((variant) => variant.canonicalSlug)),
   );
+  // Language drives raw-history field selection (EN → `market`, else
+  // `low`); provider_card_map has no language column so we look it up.
+  const languageBySlug = await loadCanonicalLanguageBySlug(canonicalSlugs);
   const sinceIso = new Date(Date.now() - (days * 24 * 60 * 60 * 1000)).toISOString();
   const existingSnapshotState = await loadExistingSnapshotHistoryState(variantRefs, sinceIso);
   const slugRiskScores = canonicalSlugs.length > 0
@@ -1816,10 +1871,13 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
       }
 
       for (const variant of target.variants) {
+        // EN → prefer `market`; JP/other (or unknown slug) → prefer `low`.
+        const preferLow = (languageBySlug.get(variant.canonicalSlug) ?? "EN") !== "EN";
         const resolvedHistory = resolveScrydexRawHistoryDays({
           historyDays,
           providerVariantToken: variant.providerVariantToken,
           windowDays: days,
+          preferLow,
         });
         historyRowsSkippedNoNearMint += resolvedHistory.providerDaysMissingRaw;
 
