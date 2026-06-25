@@ -50,6 +50,25 @@ function variantRefLanguageLabel(canonicalLanguage: string): string {
   }
 }
 
+/**
+ * Effective provider language code for a card. Scrydex's per-card
+ * `language_code` is the primary signal, but the field is optional; the
+ * set/expansion ID's `_ja` suffix is the authoritative routing signal (the
+ * client fetches JP sets from `/ja/...`, and `canonical_cards.language` is
+ * derived from it). Falling back to the set ID when the per-card field is
+ * absent/blank keeps daily normalize's language — and thus the EN→`market`
+ * / JP→`low` choice — in lockstep with the history backfill's
+ * canonical-language lookup, even if Scrydex ever drops the per-card field.
+ * No-op on current data: every JP payload carries `language_code` today
+ * (verified 2026-06-25, 0 of 2,522 JP-set payloads null), so the fallback
+ * never fires and existing rows are byte-identical.
+ */
+function resolveProviderLanguageCode(card: ScrydexCard): string {
+  const direct = String(card.language_code ?? "").trim();
+  if (direct) return direct;
+  return scrydexLanguageForSetId(card.expansion?.id);
+}
+
 // Inlined from the retired lib/providers/justtcg.ts. buildLegacyVariantRef
 // is the legacy 6-segment variant_ref format used for rows that predate the
 // printing_id-based identity. Only this file calls it, so there's no value
@@ -114,6 +133,7 @@ import { convertToUsd } from "@/lib/pricing/fx";
 //   selectAllScrydexConditionPrices,
 //   type ConditionPriceEntry,
 // } from "@/lib/backfill/scrydex-condition-price-extract";
+import { scrydexLanguageForSetId } from "@/lib/scrydex/client";
 import type { ScrydexCard, ScrydexVariant } from "@/lib/scrydex/client";
 
 const PROVIDER = "SCRYDEX";
@@ -379,6 +399,16 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
   const variants = card.variants ?? [];
   const results: VariantObservation[] = [];
 
+  // EN-RAW headline tracks scrydex `market` (sold-anchored, mirrors the
+  // PriceCharting trusted feed); JP/other keeps `low`. The per-condition
+  // `low` field episodically latches onto a junk listing in either
+  // direction for EN — see parseScrydexPriceObject docs + lockstep mirror
+  // in scrydex-price-history.ts. preferLow=true for everything non-EN.
+  // Language resolves via the set-ID fallback so a JP payload missing its
+  // per-card language_code still maps to JP (not EN) — keeping this in
+  // lockstep with the history path's canonical-language lookup.
+  const preferLow = normalizeProviderLanguageToCanonical(resolveProviderLanguageCode(card)) !== "EN";
+
   const RAW_DEFAULTS = {
     grade: "RAW" as const,
     gradedProvider: null,
@@ -390,7 +420,7 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
 
   if (variants.length === 0) {
     const prices = (card as { prices?: unknown }).prices;
-    const pricingSelection = selectPreferredScrydexPriceEntry(prices);
+    const pricingSelection = selectPreferredScrydexPriceEntry(prices, { preferLow });
     if (pricingSelection) {
       const semantics = parseScrydexVariantSemantics("unknown");
       results.push({
@@ -450,7 +480,7 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
     const variantName = String((variant as ScrydexVariant).name ?? "unknown").trim() || "unknown";
     const variantId = variantName.replace(/\s+/g, "_").toLowerCase();
     const variantPrices = (variant as ScrydexVariant).prices;
-    const pricingSelection = selectPreferredScrydexPriceEntry(variantPrices);
+    const pricingSelection = selectPreferredScrydexPriceEntry(variantPrices, { preferLow });
 
     if (pricingSelection) {
       const semantics = parseScrydexVariantSemantics(variantName);
@@ -570,14 +600,14 @@ function buildObservationRow(params: {
     normalized_stamp: variant.normalizedStamp,
     provider_condition: variant.providerCondition,
     normalized_condition: variant.normalizedCondition,
-    provider_language: card.language_code ?? "en",
-    normalized_language: normalizeProviderLanguageToCanonical(card.language_code),
+    provider_language: resolveProviderLanguageCode(card),
+    normalized_language: normalizeProviderLanguageToCanonical(resolveProviderLanguageCode(card)),
     variant_ref: buildLegacyVariantRef(
       variant.variantName,
       variant.normalizedEdition,
       variant.stampLabel,
       variant.providerCondition ?? (isGraded ? "graded" : "Near Mint"),
-      variantRefLanguageLabel(normalizeProviderLanguageToCanonical(card.language_code)),
+      variantRefLanguageLabel(normalizeProviderLanguageToCanonical(resolveProviderLanguageCode(card))),
       isGraded ? `${variant.gradedProvider}_${variant.gradedBucket}` : "RAW",
     ),
     observed_price: variant.observedPrice,
@@ -608,11 +638,13 @@ function buildObservationRow(params: {
       isPerfect: variant.isPerfect,
       lowPrice: variant.lowPrice,
       highPrice: variant.highPrice,
-      // Phase C-2 (2026-05-16): asking-anchored value (USD) preserved
+      // Phase C-2 (2026-05-16): scrydex `market` (USD) preserved
       // separately so the card detail page can render "Asking: $X"
-      // alongside the headline (which after Phase A tracks scrydex
-      // `low`). Read by app/c/[slug]/page.tsx via the latest scrydex
-      // observation. Null on graded observations.
+      // alongside the headline. Read by app/c/[slug]/page.tsx via the
+      // latest scrydex observation. Null on graded observations. NOTE
+      // (2026-06-25): for EN-RAW the headline now ALSO tracks `market`
+      // (observed_price), so this equals the headline for EN; it still
+      // diverges for JP-RAW, whose headline tracks `low`.
       scrydexAskingPriceUsd: variant.askingPriceUsd,
     },
     updated_at: normalizedAt,

@@ -11,12 +11,12 @@ import { selectPreferredScrydexPriceEntry, selectScrydexGradedEntries } from "..
 //   4. Return null when no qualifying raw NM/Mint row exists
 
 function runScrydexRawPriceSelectionTests() {
-  // 1. Mixed array — raw NM must win over graded and raw LP. With the
-  //    2026-05-15 switch to preferLow=true for raw paths, headline price is
-  //    drawn from `low` (matches TCGplayer's published Market Price label,
-  //    which is sold-anchored) rather than scrydex's `market` field (which
-  //    is asking-anchored and inflates on thin-liquidity cards). See
-  //    parseScrydexPriceObject docs for the empirical evidence.
+  // 1. Mixed array — raw NM must win over graded and raw LP. These
+  //    no-option calls exercise the DEFAULT path (preferLow=true), which is
+  //    the JP/legacy behavior: headline drawn from `low`. The live EN
+  //    headline now passes preferLow=false (prefer `market`) — covered in
+  //    runScrydexEnPrefersMarketTests below. See parseScrydexPriceObject
+  //    docs for why the field choice flips by language.
   const mixed = [
     { type: "graded", condition: "Gem Mint", grade: "10", company: "PSA", market: 157.0 },
     { type: "graded", condition: "Mint", grade: "9", company: "PSA", market: 20.5 },
@@ -148,6 +148,66 @@ function runScrydexRawPriceSelectionTests() {
 
 runScrydexRawPriceSelectionTests();
 
+// ── EN-RAW prefers `market` (2026-06-25 flip) ─────────────────────────────────
+
+function runScrydexEnPrefersMarketTests() {
+  // EN-RAW headline tracks scrydex `market` (sold-anchored, mirrors the
+  // PriceCharting trusted feed). The per-condition `low` field episodically
+  // latches onto a junk listing in BOTH directions for EN, so promoting
+  // `market` removes that contamination class. JP keeps `low`. The live
+  // normalize path passes preferLow = (language !== "EN").
+
+  // 1. Krookodile-ex junk-LOW case: NM low=$0.05 is junk (its own NM
+  //    market=$0.45, PriceCharting=$1.56). EN (preferLow:false) must surface
+  //    `market` ($0.45), not the cratered `low`.
+  const krookodile = [
+    { type: "raw", condition: "Near Mint", low: 0.05, market: 0.45, mid: 0.3, high: 1.2 },
+  ];
+  const enPick = selectPreferredScrydexPriceEntry(krookodile, { preferLow: false });
+  assert.ok(enPick, "EN raw NM must produce a selection");
+  assert.equal(enPick.price, 0.45, "EN must surface scrydex `market` ($0.45), not junk `low` ($0.05)");
+  // Same fixture under the default (JP/legacy) path still picks the low.
+  const jpPick = selectPreferredScrydexPriceEntry(krookodile);
+  assert.equal(jpPick.price, 0.05, "default (preferLow=true) still surfaces `low`");
+
+  // 2. Electrode-GX spike-HIGH case: NM low spikes to $131.90 while market
+  //    stays sane (~$10.31). EN must surface `market`, dodging the spike.
+  const electrode = [
+    { type: "raw", condition: "Near Mint", low: 131.9, market: 10.31, mid: 12.0, high: 140.0 },
+  ];
+  const electrodeEn = selectPreferredScrydexPriceEntry(electrode, { preferLow: false });
+  assert.equal(electrodeEn.price, 10.31, "EN must surface sane `market` ($10.31), not spiked `low` ($131.90)");
+
+  // 3. EN tiebreak: with market+low both present on competing rows, the row
+  //    carrying `market` wins, and its `market` value is surfaced.
+  const enTiebreak = [
+    { type: "raw", condition: "Near Mint", low: 2.5 },             // low only
+    { type: "raw", condition: "Near Mint", market: 3.5, low: 3.0 }, // market + low
+  ];
+  const enTiebreakPick = selectPreferredScrydexPriceEntry(enTiebreak, { preferLow: false });
+  assert.ok(enTiebreakPick);
+  assert.equal(enTiebreakPick.price, 3.5, "EN: row with `market` wins; surfaces `market` value");
+
+  // 4. EN with only `low` populated still falls back to `low` (never null
+  //    when a positive price exists somewhere).
+  const enLowOnly = [
+    { type: "raw", condition: "Near Mint", low: 4.2 },
+  ];
+  const enLowOnlyPick = selectPreferredScrydexPriceEntry(enLowOnly, { preferLow: false });
+  assert.ok(enLowOnlyPick);
+  assert.equal(enLowOnlyPick.price, 4.2, "EN falls back to `low` when `market` absent");
+
+  // 5. JP wide-spread (Mewtwo VSTAR) under preferLow:true still surfaces
+  //    `low` (¥4,300), confirming JP behavior is untouched by the EN flip.
+  const mewtwoJp = [
+    { type: "raw", condition: "Near Mint", low: 4300, mid: 5900, high: 7500, market: 7500, currency: "JPY" },
+  ];
+  const mewtwoPick = selectPreferredScrydexPriceEntry(mewtwoJp, { preferLow: true });
+  assert.equal(mewtwoPick.price, 4300, "JP (preferLow:true) still surfaces `low` (¥4,300) — unchanged");
+}
+
+runScrydexEnPrefersMarketTests();
+
 // ── Graded extraction tests ───────────────────────────────────────────────────
 
 function runScrydexGradedExtractionTests() {
@@ -244,4 +304,5 @@ function runScrydexGradedExtractionTests() {
 runScrydexGradedExtractionTests();
 
 console.log("scrydex raw price selection tests passed");
+console.log("scrydex EN-prefers-market tests passed");
 console.log("scrydex graded extraction tests passed");
