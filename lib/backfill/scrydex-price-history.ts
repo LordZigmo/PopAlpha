@@ -1871,8 +1871,10 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
       }
 
       for (const variant of target.variants) {
-        // EN → prefer `market`; JP/other (or unknown slug) → prefer `low`.
-        const preferLow = (languageBySlug.get(variant.canonicalSlug) ?? "EN") !== "EN";
+        // Only an explicitly-resolved EN flips to `market`; JP/other AND
+        // any unresolved slug keep `low` — matching the conservative
+        // function-level default (preferLow defaults true everywhere).
+        const preferLow = languageBySlug.get(variant.canonicalSlug) !== "EN";
         const resolvedHistory = resolveScrydexRawHistoryDays({
           historyDays,
           providerVariantToken: variant.providerVariantToken,
