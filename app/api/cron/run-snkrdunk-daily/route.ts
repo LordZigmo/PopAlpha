@@ -33,6 +33,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
+import { getCurrencyToUsdRateAt } from "@/lib/pricing/fx";
 import { scrapeSnkrdunk, SnkrdunkPushbackError } from "@/scripts/scrape-snkrdunk.mjs";
 import { aggregateSnkrdunkListings } from "@/lib/jp/snkrdunk-matcher.mjs";
 import {
@@ -61,12 +62,12 @@ const INTER_CARD_DELAY_MS = 4000;
 // price_usd, leaving price_jpy at the migration-backfilled value
 // indefinitely (or NULL on newly inserted per-printing rows). Codex P2
 // on PR #94. Phase C-1b 2026-05-16.
-const DEFAULT_JPY_TO_USD_RATE = 0.0068;
-const JPY_TO_USD = (() => {
-  const raw = process.env.JPY_TO_USD_RATE;
-  const parsed = raw != null ? Number.parseFloat(raw) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_JPY_TO_USD_RATE;
-})();
+//
+// The JPY→USD rate is resolved live per run from the daily fx_rates series
+// (getCurrencyToUsdRateAt, ingested by /api/cron/ingest-fx-rates) and
+// threaded into processCard, instead of a frozen ~¥147/$1 constant.
+// getCurrencyToUsdRateAt falls back to the JPY_TO_USD_RATE env var / 0.0068
+// default when fx_rates has no JPYUSD row yet.
 // Write/park split (option E of the JP display-policy design, 2026-06-12).
 // Formerly a single MIN_SAMPLE_COUNT = 3 that gated the WRITE: a scrape
 // returning 1-2 sold samples per grade wrote nothing — the observation
@@ -251,6 +252,7 @@ async function pickRefreshCandidates(
 async function processCard(
   supabase: ReturnType<typeof dbAdmin>,
   candidate: RefreshCandidate,
+  jpyToUsd: number,
 ): Promise<
   SnkrdunkProcessResult
 > {
@@ -334,7 +336,7 @@ async function processCard(
     // uses. Skip when price is missing/non-positive so the row's JPY
     // doesn't carry a misleading value. See JPY_TO_USD constant above.
     const priceJpy = typeof priceUsd === "number" && Number.isFinite(priceUsd) && priceUsd > 0
-      ? Math.round(priceUsd / JPY_TO_USD)
+      ? Math.round(priceUsd / jpyToUsd)
       : null;
     const { error } = await supabase.from("snkrdunk_card_prices").upsert(
       {
@@ -343,7 +345,7 @@ async function processCard(
         grade: obs.grade,
         price_usd: priceUsd,
         price_jpy: priceJpy,
-        fx_rate_used: priceJpy != null ? JPY_TO_USD : null,
+        fx_rate_used: priceJpy != null ? jpyToUsd : null,
         currency: obs.currency ?? "USD",
         sample_count: obs.count,
         snkrdunk_product_code: productCode,
@@ -434,6 +436,14 @@ export async function GET(req: Request) {
   );
 
   const supabase = dbAdmin();
+  // Resolve the live JPY→USD rate once per run (freshest fx_rates row,
+  // env/0.0068 fallback) for the price_jpy back-conversion below.
+  const { rate: jpyToUsd, fxSource: jpyFxSource } = await getCurrencyToUsdRateAt({
+    supabase,
+    currency: "JPY",
+    asOf: null,
+  });
+  console.info(`[run-snkrdunk-daily] JPY/USD ${jpyToUsd} (source=${jpyFxSource})`);
   const runId = await createJpIngestionRun(supabase, {
     provider: "SNKRDUNK",
     route: SNKRDUNK_ROUTE,
@@ -515,7 +525,7 @@ export async function GET(req: Request) {
     let result: Awaited<ReturnType<typeof processCard>>;
     const attemptStartedAt = Date.now();
     try {
-      result = await processCard(supabase, candidate);
+      result = await processCard(supabase, candidate, jpyToUsd);
     } catch (err) {
       if (err instanceof SnkrdunkPushbackError) {
         haltReason = `snkrdunk-pushback: ${err.message}`;

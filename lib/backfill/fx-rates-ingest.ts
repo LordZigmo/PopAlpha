@@ -2,8 +2,18 @@ import { dbAdmin } from "@/lib/db/admin";
 
 const JOB = "fx_rates_ingest";
 const SOURCE = "ECB_FRANKFURTER";
-const PAIR = "EURUSD";
 const DEFAULT_DAYS_BACK = 7;
+
+// Every FX pair we keep fresh from the ECB/Frankfurter daily series.
+// EURUSD feeds Scrydex EUR→USD conversion; JPYUSD feeds the JP price
+// pipelines (Yahoo! Auctions JP + Snkrdunk), which previously baked a
+// frozen 0.0068 (~¥147/$1) constant into every row. Frankfurter derives
+// every pair from the ECB EUR reference rates, so `from=JPY&to=USD`
+// returns USD-per-1-yen — exactly the multiplier the pipelines apply.
+const PAIRS: ReadonlyArray<{ pair: string; base: string; quote: string }> = [
+  { pair: "EURUSD", base: "EUR", quote: "USD" },
+  { pair: "JPYUSD", base: "JPY", quote: "USD" },
+];
 
 type FxApiResponse = {
   amount?: number;
@@ -15,8 +25,8 @@ type FxApiResponse = {
 type FxRateWriteRow = {
   source: string;
   pair: string;
-  base_currency: "EUR";
-  quote_currency: "USD";
+  base_currency: string;
+  quote_currency: string;
   rate: number;
   rate_date: string;
   published_at: null;
@@ -35,7 +45,7 @@ type FxIngestResult = {
   ratesPrepared: number;
   ratesUpserted: number;
   firstError: string | null;
-  sampleRates: Array<{ rateDate: string; rate: number }>;
+  sampleRates: Array<{ pair: string; rateDate: string; rate: number }>;
 };
 
 function parsePositiveInt(value: number | undefined, fallback: number): number {
@@ -50,8 +60,11 @@ function isoDateDaysAgo(daysAgo: number): string {
   return now.toISOString().slice(0, 10);
 }
 
-async function fetchEurUsdDaily(date: string): Promise<FxRateWriteRow> {
-  const endpoint = `https://api.frankfurter.app/${date}?from=EUR&to=USD`;
+async function fetchDailyRate(
+  pairConfig: { pair: string; base: string; quote: string },
+  date: string,
+): Promise<FxRateWriteRow> {
+  const endpoint = `https://api.frankfurter.app/${date}?from=${pairConfig.base}&to=${pairConfig.quote}`;
   const res = await fetch(endpoint, {
     method: "GET",
     headers: { accept: "application/json" },
@@ -64,18 +77,18 @@ async function fetchEurUsdDaily(date: string): Promise<FxRateWriteRow> {
   const json = (await res.json()) as FxApiResponse;
   const base = String(json.base ?? "").toUpperCase();
   const rateDate = String(json.date ?? "").trim();
-  const rate = json.rates?.USD;
-  if (base !== "EUR") throw new Error(`fx fetch invalid base '${base}' for ${endpoint}`);
+  const rate = json.rates?.[pairConfig.quote];
+  if (base !== pairConfig.base) throw new Error(`fx fetch invalid base '${base}' for ${endpoint}`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(rateDate)) throw new Error(`fx fetch invalid date '${rateDate}' for ${endpoint}`);
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) {
-    throw new Error(`fx fetch invalid EURUSD rate for ${endpoint}`);
+    throw new Error(`fx fetch invalid ${pairConfig.pair} rate for ${endpoint}`);
   }
 
   return {
     source: SOURCE,
-    pair: PAIR,
-    base_currency: "EUR",
-    quote_currency: "USD",
+    pair: pairConfig.pair,
+    base_currency: pairConfig.base,
+    quote_currency: pairConfig.quote,
     rate,
     rate_date: rateDate,
     published_at: null,
@@ -101,7 +114,7 @@ export async function runFxRatesIngest(opts: {
   let daysFetched = 0;
   let ratesPrepared = 0;
   let ratesUpserted = 0;
-  const sampleRates: Array<{ rateDate: string; rate: number }> = [];
+  const sampleRates: Array<{ pair: string; rateDate: string; rate: number }> = [];
 
   const { data: runRow, error: runStartError } = await supabase
     .from("ingest_runs")
@@ -116,7 +129,7 @@ export async function runFxRatesIngest(opts: {
       meta: {
         mode: "daily-fx",
         daysBack,
-        pair: PAIR,
+        pairs: PAIRS.map((p) => p.pair),
         source: SOURCE,
       },
     })
@@ -131,33 +144,46 @@ export async function runFxRatesIngest(opts: {
 
   try {
     const rows: FxRateWriteRow[] = [];
-    for (let daysAgo = 0; daysAgo < daysBack; daysAgo += 1) {
-      const day = isoDateDaysAgo(daysAgo);
-      const row = await fetchEurUsdDaily(day);
-      daysFetched += 1;
-      rows.push(row);
-    }
-
-    const byRateDate = new Map<string, FxRateWriteRow>();
-    for (const row of rows) {
-      const current = byRateDate.get(row.rate_date);
-      if (!current || current.fetched_at < row.fetched_at) {
-        byRateDate.set(row.rate_date, row);
+    // One pair failing (or one day missing) must not abort the others —
+    // record the first error and keep going so a JPY hiccup never starves
+    // the EUR series (or vice versa). A fully empty result still surfaces
+    // via firstError + ratesUpserted === 0.
+    for (const pairConfig of PAIRS) {
+      for (let daysAgo = 0; daysAgo < daysBack; daysAgo += 1) {
+        const day = isoDateDaysAgo(daysAgo);
+        try {
+          const row = await fetchDailyRate(pairConfig, day);
+          daysFetched += 1;
+          rows.push(row);
+        } catch (error) {
+          if (!firstError) firstError = error instanceof Error ? error.message : String(error);
+        }
       }
     }
-    const dedupedRows = [...byRateDate.values()];
+
+    // Dedup per (pair, rate_date) — a calendar date carries one row PER
+    // pair, so keying on rate_date alone would drop EURUSD or JPYUSD.
+    const byPairDate = new Map<string, FxRateWriteRow>();
+    for (const row of rows) {
+      const key = `${row.pair}:${row.rate_date}`;
+      const current = byPairDate.get(key);
+      if (!current || current.fetched_at < row.fetched_at) {
+        byPairDate.set(key, row);
+      }
+    }
+    const dedupedRows = [...byPairDate.values()];
     ratesPrepared = dedupedRows.length;
 
     if (dedupedRows.length > 0) {
       const { data, error } = await supabase
         .from("fx_rates")
         .upsert(dedupedRows, { onConflict: "source,pair,rate_date" })
-        .select("id, rate_date, rate");
+        .select("id, pair, rate_date, rate");
       if (error) throw new Error(`fx_rates(upsert): ${error.message}`);
       ratesUpserted = (data ?? []).length;
-      for (const row of (data ?? []) as Array<{ rate_date: string; rate: number }>) {
+      for (const row of (data ?? []) as Array<{ pair: string; rate_date: string; rate: number }>) {
         if (sampleRates.length >= 10) break;
-        sampleRates.push({ rateDate: row.rate_date, rate: row.rate });
+        sampleRates.push({ pair: row.pair, rateDate: row.rate_date, rate: row.rate });
       }
     }
   } catch (error) {
@@ -192,7 +218,7 @@ export async function runFxRatesIngest(opts: {
         meta: {
           mode: "daily-fx",
           daysBack,
-          pair: PAIR,
+          pairs: PAIRS.map((p) => p.pair),
           source: SOURCE,
           daysFetched,
           ratesPrepared,

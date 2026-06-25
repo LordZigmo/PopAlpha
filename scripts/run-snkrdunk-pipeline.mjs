@@ -42,6 +42,7 @@ import { statSync, readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { scrapeSnkrdunk, SnkrdunkPushbackError } from "./scrape-snkrdunk.mjs";
 import { aggregateSnkrdunkListings } from "../lib/jp/snkrdunk-matcher.mjs";
+import { resolveJpyToUsdRate } from "../lib/pricing/jp-fx-rate.mjs";
 
 dotenv.config({ path: ".env.local" });
 
@@ -241,24 +242,28 @@ async function resolvePrintingId(supabase, slug) {
   return null;
 }
 
-// Mirror of run-yahoo-jp-daily/route.ts: parse JPY_TO_USD_RATE from env
-// with a 0.0068 fallback (~147 JPY/USD). Used at write time to derive
-// price_jpy for the "¥X,XXX ($X)" tile display added in Phase C-1b
-// (2026-05-16). Snkrdunk's English API serves USD only, so this is an
-// FX-derived approximation, not the seller's listed yen value.
+// Used at write time to derive price_jpy for the "¥X,XXX ($X)" tile
+// display added in Phase C-1b (2026-05-16). Snkrdunk's English API serves
+// USD only, so this is an FX-derived approximation, not the seller's
+// listed yen value. The live rate from the daily fx_rates series is
+// resolved in main() and assigned to `jpyToUsd`; STATIC_JPY_TO_USD_FALLBACK
+// (env / 0.0068 ~147 JPY/USD) only applies when fx_rates has no JPYUSD row.
 const DEFAULT_JPY_TO_USD_RATE = 0.0068;
-const JPY_TO_USD = (() => {
+const STATIC_JPY_TO_USD_FALLBACK = (() => {
   const raw = process.env.JPY_TO_USD_RATE;
   const parsed = raw != null ? Number.parseFloat(raw) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_JPY_TO_USD_RATE;
 })();
+// Reassigned once at the top of main() from the live fx_rates lookup;
+// module-scoped so writeSnkrdunkPrice (called within main()) sees it.
+let jpyToUsd = STATIC_JPY_TO_USD_FALLBACK;
 
 async function writeSnkrdunkPrice(supabase, slug, payload) {
   const priceUsd = payload.price_usd;
   // Derive JPY from USD at write time. ROUND to integer yen (yen has no
   // subunit in everyday use). Skip when price_usd is missing.
   const priceJpy = typeof priceUsd === "number" && Number.isFinite(priceUsd) && priceUsd > 0
-    ? Math.round(priceUsd / JPY_TO_USD)
+    ? Math.round(priceUsd / jpyToUsd)
     : null;
   const row = {
     canonical_slug: slug,
@@ -266,7 +271,7 @@ async function writeSnkrdunkPrice(supabase, slug, payload) {
     grade: payload.grade ?? "RAW",
     price_usd: priceUsd,
     price_jpy: priceJpy,
-    fx_rate_used: priceJpy != null ? JPY_TO_USD : null,
+    fx_rate_used: priceJpy != null ? jpyToUsd : null,
     currency: payload.currency ?? "USD",
     sample_count: payload.sample_count,
     snkrdunk_product_code: payload.snkrdunk_product_code,
@@ -508,6 +513,12 @@ async function main() {
     process.env.SUPABASE_SERVICE_ROLE_KEY,
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
+
+  // Resolve the live JPY→USD rate once per run from the daily fx_rates
+  // series (env/0.0068 fallback) for the price_jpy back-conversion.
+  const fx = await resolveJpyToUsdRate({ supabase, fallbackRate: STATIC_JPY_TO_USD_FALLBACK });
+  jpyToUsd = fx.rate;
+  console.log(`[snkrdunk-pipeline] JPY/USD ${jpyToUsd} (source=${fx.source}${fx.rateDate ? `, ${fx.rateDate}` : ""})`);
 
   const pairs = await loadInputList(supabase, opts);
   if (pairs.length === 0) {
