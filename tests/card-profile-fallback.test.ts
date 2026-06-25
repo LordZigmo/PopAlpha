@@ -85,31 +85,35 @@ export async function runCardProfileFallbackTests() {
     "tier: all-nulls → mid_premium (no signal to dispatch on)",
   );
 
-  // ── Bulk narrative ────────────────────────────────────────────────────────
+  // ── Low-dollar floor (≤ $2): deterministic honest note, no tier prose ──────
 
   {
+    // A $0.30 bulk common is below the floor → low-dollar note, not a tier
+    // narrative (the `bulk` tier is now shadowed by the floor entirely).
     const result = buildFallbackProfile(
       makeInput({ canonicalName: "Patrat", marketPrice: 0.30, rarity: "Common", setName: "Sword & Shield" }),
     );
-    assert.equal(result.source, "fallback");
-    assert.match(result.summaryLong, /[Bb]ulk-tier common from Sword & Shield/);
-    assert.match(result.summaryLong, /\$0\.30/);
-    // Bulk narrative without a notable move should NOT use the move-led
-    // sentence. The original generic copy lived in the old fallback;
-    // make sure it's gone.
-    assert.doesNotMatch(result.summaryLong, /holding steady around/);
-    assert.doesNotMatch(result.summaryLong, /up \+|down -/);
+    assert.equal(result.source, "low_dollar");
+    assert.match(result.summaryShort, /Low-dollar card/);
+    assert.match(result.summaryShort, /too thin/);
+    assert.equal(result.signalLabel, "STEADY");
+    assert.equal(result.verdict, "INSUFFICIENT_DATA");
+    assert.equal(result.chip, "💵 Low-dollar");
+    // Never fabricate a move/trend on a sub-$2 card.
+    assert.doesNotMatch(result.summaryLong, /up \+|down -|decrease|increase|% over/);
   }
 
   // ── Set-completion narrative ──────────────────────────────────────────────
 
   {
+    // $2.50 Rare — ABOVE the $2 floor, still set_completion (< $3), so it keeps
+    // the "finishing the set" narrative (the tier is reachable in $2–$3).
     const result = buildFallbackProfile(
-      makeInput({ canonicalName: "Roselia", marketPrice: 1.50, rarity: "Rare", setName: "Stellar Crown", year: 2024 }),
+      makeInput({ canonicalName: "Roselia", marketPrice: 2.50, rarity: "Rare", setName: "Stellar Crown", year: 2024 }),
     );
     assert.equal(result.source, "fallback");
     assert.match(result.summaryLong, /finishing the Stellar Crown set/);
-    assert.match(result.summaryLong, /\$1\.50/);
+    assert.match(result.summaryLong, /\$2\.50/);
   }
 
   // ── Vintage cheap narrative ───────────────────────────────────────────────
@@ -126,8 +130,10 @@ export async function runCardProfileFallbackTests() {
   // ── Digital narrative ─────────────────────────────────────────────────────
 
   {
+    // Digital narrative at $5 — above the floor, so it exercises the digital
+    // tier rather than the low-dollar note.
     const result = buildFallbackProfile(
-      makeInput({ marketPrice: 2, isDigital: true, setName: "Genetic Apex", year: 2024, rarity: null }),
+      makeInput({ marketPrice: 5, isDigital: true, setName: "Genetic Apex", year: 2024, rarity: null }),
     );
     assert.equal(result.source, "fallback");
     assert.match(result.summaryLong, /Digital card from Genetic Apex/);
@@ -170,9 +176,12 @@ export async function runCardProfileFallbackTests() {
     assert.match(result.summaryLong, /recent market signals are higher near \$1,751/);
   }
 
-  // ── High-mover override (bulk tier with notable move) ─────────────────────
+  // ── Low-dollar move suppression (the Krookodile/Xerneas case) ─────────────
 
   {
+    // A $0.80 card "up +25%" is penny-rounding noise, not a breakout. The floor
+    // wins over the mover narrative — no "+25% / strong move" prose, no BREAKOUT
+    // badge. This is exactly the screenshot the floor exists to kill.
     const result = buildFallbackProfile(
       makeInput({
         canonicalName: "Patrat",
@@ -182,14 +191,11 @@ export async function runCardProfileFallbackTests() {
         changePct7d: 25,
       }),
     );
-    assert.equal(result.source, "fallback");
-    // Move-led sentence wins for the opener
-    assert.match(result.summaryLong, /Patrat is up \+25% over the last 7 days/);
-    // BREAKOUT signal triggers strong-move sentence
-    assert.match(result.summaryLong, /strong move higher in a short window/);
-    // Watch line gets bulk flavor instead of the generic thin/steady/dense bucket
-    assert.match(result.summaryLong, /still bulk-tier territory/);
-    assert.equal(result.signalLabel, "BREAKOUT");
+    assert.equal(result.source, "low_dollar");
+    assert.match(result.summaryShort, /Low-dollar card/);
+    assert.doesNotMatch(result.summaryLong, /\+25%|strong move|BREAKOUT|bulk-tier/);
+    assert.equal(result.signalLabel, "STEADY");
+    assert.equal(result.verdict, "INSUFFICIENT_DATA");
   }
 
   // ── Missing rarity / missing year (graceful fall-through) ─────────────────
@@ -217,7 +223,7 @@ export async function runCardProfileFallbackTests() {
 
   {
     const result = buildFallbackProfile(makeInput());
-    assert.equal(result.source, "fallback");
+    assert.equal(result.source, "low_dollar");
     assert.equal(result.modelLabel, CARD_PROFILE_MODEL_LABEL);
     assert.equal(result.inputTokens, null);
     assert.equal(result.outputTokens, null);

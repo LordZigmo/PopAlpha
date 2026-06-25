@@ -272,6 +272,10 @@ async function processChunk(
 ): Promise<{
   llm: number;
   fallbacks: number;
+  // Intentional low-dollar skips (deterministic note, no LLM call). Tracked
+  // separately so they don't read as LLM fallback failures or trip the
+  // all-fallback degradation check.
+  lowDollar: number;
   errors: number;
   inputTokens: number;
   outputTokens: number;
@@ -293,6 +297,7 @@ async function processChunk(
 }> {
   let llm = 0;
   let fallbacks = 0;
+  let lowDollar = 0;
   let errors = 0;
   let inputTokens = 0;
   let outputTokens = 0;
@@ -338,6 +343,10 @@ async function processChunk(
           llm++;
           inputTokens += profile.inputTokens ?? 0;
           outputTokens += profile.outputTokens ?? 0;
+        } else if (profile.lowDollarSkip) {
+          // Intentional low-dollar skip (deterministic note, no LLM call). NOT
+          // a fallback failure — excluded from the degradation denominator.
+          lowDollar++;
         } else {
           fallbacks++;
           if (profile.failureReason) {
@@ -365,6 +374,7 @@ async function processChunk(
   return {
     llm,
     fallbacks,
+    lowDollar,
     errors,
     inputTokens,
     outputTokens,
@@ -415,6 +425,7 @@ export async function GET(req: Request) {
   const supabase = dbAdmin();
   let totalLlm = 0;
   let totalFallbacks = 0;
+  let totalLowDollar = 0;
   let totalErrors = 0;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -451,6 +462,7 @@ export async function GET(req: Request) {
       const stats = await processChunk(supabase, chunk, concurrency, deadline);
       totalLlm += stats.llm;
       totalFallbacks += stats.fallbacks;
+      totalLowDollar += stats.lowDollar;
       totalErrors += stats.errors;
       totalInputTokens += stats.inputTokens;
       totalOutputTokens += stats.outputTokens;
@@ -535,7 +547,13 @@ export async function GET(req: Request) {
   // tokens — the prior silent-success shape — now returns ok:false so
   // the caller (or a future scheduled cron) can alert instead of
   // shrugging.
-  const llmPathDegraded = isLlmPathDegraded({ processed: totalProcessed, llmCount: totalLlm });
+  // Exclude intentional low-dollar skips from the denominator — a batch of only
+  // penny cards legitimately produces zero LLM calls and must NOT read as
+  // "every call fell back" (that would 500 normal penny-card refreshes).
+  const llmPathDegraded = isLlmPathDegraded({
+    processed: totalProcessed - totalLowDollar,
+    llmCount: totalLlm,
+  });
   const ok = firstError === null && !llmPathDegraded && !haltedForLlmProviderFailure;
   return NextResponse.json(
     {
@@ -547,6 +565,7 @@ export async function GET(req: Request) {
       totalProcessed,
       llmGenerated: totalLlm,
       fallbacksUsed: totalFallbacks,
+      lowDollarSkipped: totalLowDollar,
       errors: totalErrors,
       totalInputTokens,
       totalOutputTokens,

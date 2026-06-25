@@ -74,6 +74,13 @@ const CHECKS = [
       if ((b.totalProcessed ?? 0) === 0) {
         return { status: "warn", detail: "ok:true, totalProcessed=0 — no candidate to exercise the LLM (inconclusive)" };
       }
+      // A low-dollar (<= $2) candidate is processed deterministically with NO
+      // LLM call by design (now common in the catalog), so llmGenerated=0 there
+      // is healthy, not a silent fallback. Only the case NOT explained by a
+      // low-dollar skip is the silent lie this guards.
+      if ((b.llmGenerated ?? 0) < 1 && (b.lowDollarSkipped ?? 0) > 0) {
+        return { status: "warn", detail: `ok:true, the single candidate was a low-dollar skip (no LLM by design) — inconclusive (lowDollarSkipped=${b.lowDollarSkipped})` };
+      }
       if ((b.llmGenerated ?? 0) < 1) {
         return { status: "fail", detail: `SILENT FALLBACK: ok:true + processed=${b.totalProcessed} but llmGenerated=0` };
       }
