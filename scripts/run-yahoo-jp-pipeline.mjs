@@ -50,18 +50,24 @@ import { statSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { scrapeYahooJp } from "./scrape-yahoo-jp.mjs";
 import { buildPrecisionQuery, selectMatched } from "../lib/jp/matcher.mjs";
+import { resolveJpyToUsdRate } from "../lib/pricing/jp-fx-rate.mjs";
 
 dotenv.config({ path: ".env.local" });
 
-// Mirrors lib/pricing/fx.ts DEFAULT_JPY_TO_USD_RATE so the
-// USD-converted column on card_metrics matches what the rest of the
-// app would produce. If env var is set, it overrides.
+// Static env/default fallback (matches lib/pricing/fx.ts
+// DEFAULT_JPY_TO_USD_RATE). The live rate from the daily fx_rates series
+// is resolved in main() and assigned to `jpyToUsd` below; this constant
+// only applies when fx_rates has no JPYUSD row yet.
 const DEFAULT_JPY_TO_USD_RATE = 0.0068;
-const JPY_TO_USD = (() => {
+const STATIC_JPY_TO_USD_FALLBACK = (() => {
   const raw = process.env.JPY_TO_USD_RATE;
   const parsed = raw ? Number.parseFloat(raw) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_JPY_TO_USD_RATE;
 })();
+// Reassigned once at the top of main() from the live fx_rates lookup.
+// Module-scoped so the per-card conversion helpers (which run inside
+// main()'s loop, after the assignment) pick up the resolved value.
+let jpyToUsd = STATIC_JPY_TO_USD_FALLBACK;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -292,7 +298,7 @@ async function writeYahooJpPrice(supabase, slug, payload) {
     // Store the FX rate used so historical rows can be re-converted
     // if JPY_TO_USD_RATE drifts. Avoids auditability decay — see the
     // migration's fx_rate_used column comment.
-    fx_rate_used: JPY_TO_USD,
+    fx_rate_used: jpyToUsd,
     sample_count: payload.yahoo_jp_sample_count,
     observed_at: payload.yahoo_jp_observed_at,
     updated_at: new Date().toISOString(),
@@ -417,7 +423,7 @@ async function processCard(supabase, card, opts) {
     (o) => o.grade === "RAW" && o.count >= opts.minSampleCount,
   );
   const yenMedian = rawObs.median;
-  const usdMedian = Math.round(yenMedian * JPY_TO_USD * 100) / 100;
+  const usdMedian = Math.round(yenMedian * jpyToUsd * 100) / 100;
 
   if (opts.dryRun) {
     return {
@@ -446,7 +452,7 @@ async function processCard(supabase, card, opts) {
   try {
     for (const obs of writableObs) {
       const obsYen = obs.median;
-      const obsUsd = Math.round(obsYen * JPY_TO_USD * 100) / 100;
+      const obsUsd = Math.round(obsYen * jpyToUsd * 100) / 100;
       writeResult = await writeYahooJpPrice(supabase, card.slug, {
         printing_id: obs.printing_id,
         yahoo_jp_price: obsUsd,
@@ -546,6 +552,12 @@ async function main() {
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
 
+  // Resolve the live JPY→USD rate once per run from the daily fx_rates
+  // series (env/0.0068 fallback) before any conversion happens.
+  const fx = await resolveJpyToUsdRate({ supabase, fallbackRate: STATIC_JPY_TO_USD_FALLBACK });
+  jpyToUsd = fx.rate;
+  console.log(`[yahoo-jp-pipeline] JPY/USD ${jpyToUsd} (source=${fx.source}${fx.rateDate ? `, ${fx.rateDate}` : ""})`);
+
   const cards = await loadCanonicalCards(supabase, opts);
   if (cards.length === 0) {
     console.error("[yahoo-jp-pipeline] no canonical cards matched the input filters");
@@ -554,7 +566,7 @@ async function main() {
 
   const ratePerSec = opts.concurrency / Math.max(0.5, opts.interCardDelayMs / 1000);
   const etaMin = Math.round(cards.length / ratePerSec / 60);
-  console.log(`[yahoo-jp-pipeline] processing ${cards.length} canonical card(s) — JPY/USD ${JPY_TO_USD} | concurrency ${opts.concurrency} | inter-batch ${opts.interCardDelayMs}ms | dry-run ${opts.dryRun}`);
+  console.log(`[yahoo-jp-pipeline] processing ${cards.length} canonical card(s) — JPY/USD ${jpyToUsd} | concurrency ${opts.concurrency} | inter-batch ${opts.interCardDelayMs}ms | dry-run ${opts.dryRun}`);
   console.log(`[yahoo-jp-pipeline] approx ETA: ${etaMin} minutes (${(etaMin / 60).toFixed(1)} hours)`);
   console.log(`[yahoo-jp-pipeline] kill switch: \`touch ${opts.stopFile}\` halts cleanly between batches`);
 

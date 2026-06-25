@@ -39,6 +39,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
+import { getCurrencyToUsdRateAt } from "@/lib/pricing/fx";
 import { scrapeYahooJp } from "@/scripts/scrape-yahoo-jp.mjs";
 import { buildPrecisionQuery, selectMatched } from "@/lib/jp/matcher.mjs";
 import {
@@ -83,14 +84,12 @@ const TRANSIENT_RETRY_HOURS = 6; // scrape/write failures get a shorter cooldown
 const YAHOO_ROUTE = "/api/cron/run-yahoo-jp-daily";
 const BASE_CARD_SELECT = "slug,canonical_name,canonical_name_native,set_name,set_name_native,card_number,year,language";
 
-// Mirror the JPY/USD rate used by the orchestrator + lib/pricing/fx.ts
-// so the column matches what the rest of the app produces.
-const DEFAULT_JPY_TO_USD_RATE = 0.0068;
-const JPY_TO_USD = (() => {
-  const raw = process.env.JPY_TO_USD_RATE;
-  const parsed = raw ? Number.parseFloat(raw) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_JPY_TO_USD_RATE;
-})();
+// JPY→USD is resolved live per run from the daily fx_rates series
+// (getCurrencyToUsdRateAt, ingested by /api/cron/ingest-fx-rates) and
+// threaded into processCard, so the converted column tracks the real
+// exchange rate instead of a frozen ~¥147/$1 constant. getCurrencyToUsdRateAt
+// falls back to the JPY_TO_USD_RATE env var / 0.0068 default when the
+// fx_rates table has no JPYUSD row yet.
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -254,7 +253,7 @@ async function pickRefreshCandidates(supabase: ReturnType<typeof dbAdmin>, limit
   return orderedSlugs.map((s) => cardsBySlug.get(s)).filter((c): c is CardRow => c != null);
 }
 
-async function processCard(supabase: ReturnType<typeof dbAdmin>, card: CardRow): Promise<YahooProcessResult> {
+async function processCard(supabase: ReturnType<typeof dbAdmin>, card: CardRow, jpyToUsd: number): Promise<YahooProcessResult> {
   const query = buildPrecisionQuery(card);
   if (!query.query) {
     return { slug: card.slug, status: "no-query", reason: "precision query empty" };
@@ -316,7 +315,7 @@ async function processCard(supabase: ReturnType<typeof dbAdmin>, card: CardRow):
   let rowsWritten = 0;
   for (const obs of writableObs) {
     const obsYen = obs.median;
-    const obsUsd = Math.round(obsYen * JPY_TO_USD * 100) / 100;
+    const obsUsd = Math.round(obsYen * jpyToUsd * 100) / 100;
     const { error } = await supabase
       .from("yahoo_jp_card_prices")
       .upsert(
@@ -326,7 +325,7 @@ async function processCard(supabase: ReturnType<typeof dbAdmin>, card: CardRow):
           grade: "RAW",
           price_usd: obsUsd,
           price_jpy: obsYen,
-          fx_rate_used: JPY_TO_USD,
+          fx_rate_used: jpyToUsd,
           sample_count: obs.count,
           observed_at: observedAt,
           updated_at: observedAt,
@@ -375,7 +374,7 @@ async function processCard(supabase: ReturnType<typeof dbAdmin>, card: CardRow):
   return {
     slug: card.slug,
     status: "ok" as const,
-    yahoo_jp_price: Math.round(rawObs.median * JPY_TO_USD * 100) / 100,
+    yahoo_jp_price: Math.round(rawObs.median * jpyToUsd * 100) / 100,
     yahoo_jp_price_jpy: rawObs.median,
     rawCount: rawObs.count,
     rowsWritten,
@@ -397,6 +396,14 @@ export async function GET(req: Request) {
   );
 
   const supabase = dbAdmin();
+  // Resolve the live JPY→USD rate once per run (freshest fx_rates row,
+  // env/0.0068 fallback) and thread it through every conversion below.
+  const { rate: jpyToUsd, fxSource: jpyFxSource } = await getCurrencyToUsdRateAt({
+    supabase,
+    currency: "JPY",
+    asOf: null,
+  });
+  console.info(`[run-yahoo-jp-daily] JPY/USD ${jpyToUsd} (source=${jpyFxSource})`);
   const runId = await createJpIngestionRun(supabase, {
     provider: "YAHOO_JP",
     route: YAHOO_ROUTE,
@@ -483,7 +490,7 @@ export async function GET(req: Request) {
     }
 
     const attemptStartedAt = Date.now();
-    const result = await processCard(supabase, card);
+    const result = await processCard(supabase, card, jpyToUsd);
     processed += 1;
     if ("numberMismatchExcluded" in result) {
       numberMismatchExcludedTotal += result.numberMismatchExcluded;
