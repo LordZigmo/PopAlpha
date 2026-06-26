@@ -48,6 +48,7 @@
     "sets:backfill-metadata": "node scripts/backfill-sets-era-release-date.mjs",
     "import:scrydex-all": "node scripts/import-all-scrydex-canonical.mjs",
     "import:scrydex-missing-printings": "node scripts/import-scrydex-canonical-direct.mjs --only-missing",
+    "restamp:en-raw-history": "node --env-file=.env.local scripts/restamp-en-raw-history-market.mjs",
     "report:set-efficiency": "node scripts/report-set-efficiency.mjs",
     "watch:unknown-finishes": "node scripts/watch-unknown-finishes.mjs",
     "ai:refresh-embeddings": "node scripts/refresh-card-embeddings.mjs",
