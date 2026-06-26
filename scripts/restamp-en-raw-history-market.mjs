@@ -24,8 +24,11 @@
 //      with no internal low->market seam. (User-approved 2026-06-25.)
 //
 // Scope guards (EN-only, never touch JP/graded):
-//   - `source_window='snapshot'` and `variant_ref LIKE '%::RAW'` (graded
-//     refs end in ::PSA_G10 etc, so they're excluded).
+//   - `source_window='snapshot'`, `variant_ref LIKE '%::RAW'` AND
+//     `variant_ref NOT LIKE '%::GRADED::%'`. NOTE: graded snapshot refs ALSO
+//     end in `::RAW` (the grade is encoded earlier, as
+//     `...::GRADED::PSA::G10::RAW`), so the `::RAW` suffix alone is NOT
+//     raw-only — the `::GRADED::` exclusion is what makes it raw-only.
 //   - canonical_cards.language NULL or 'EN' (NULL is EN-managed per migration
 //     20260612014500). JP RAW change columns are owned by
 //     compute_jp_card_price_changes — explicitly excluded here.
@@ -100,12 +103,22 @@ function resolvePostgresUrl() {
   process.exit(2);
 }
 
-// Filters shared by every statement so the three cohorts stay aligned.
+// Filters shared by the cohort counts and the delete so they stay aligned.
 // EN-managed = canonical_cards.language NULL or 'EN'.
+//
+// GRADED GOTCHA: `buildProviderHistoryVariantRef` appends `::RAW` to EVERY
+// snapshot ref, including graded ones whose provider_variant_id encodes the
+// grade as `...::GRADED::<company>::<bucket>` — so graded refs look like
+// `<printing>::<setcode>:<finish>::GRADED::PSA::G10::RAW` and ALSO match
+// `LIKE '%::RAW'`. Prod has ~4.6M such graded snapshot rows. We must exclude
+// them or the delete would hard-remove EN graded history. The structural
+// token is the delimited, upper-case `::GRADED::` — use `NOT LIKE` (not
+// ILIKE) so a card whose slug merely contains the substring "graded" stays.
 const EN_RAW_SNAPSHOT_WHERE = `
   php.provider = 'SCRYDEX'
   and php.source_window = 'snapshot'
   and php.variant_ref like '%::RAW'
+  and php.variant_ref not like '%::GRADED::%'
   and exists (
     select 1 from canonical_cards cc
     where cc.slug = php.canonical_slug
@@ -113,37 +126,55 @@ const EN_RAW_SNAPSHOT_WHERE = `
   )
 `;
 
+// These full count(*) scans (7M+ rows) are informational only — the
+// re-stamp/delete are bounded + self-reporting and never depend on them. If a
+// count hits the role statement_timeout, return null and keep going rather
+// than aborting the real work.
+async function safeCount(sql, text, params = []) {
+  try {
+    const result = await sql.query(text, params);
+    return Number(result.rows[0]?.n ?? 0);
+  } catch (error) {
+    console.warn(JSON.stringify({ phase: "count", warn: "count failed (non-fatal)", message: String(error?.message ?? error) }));
+    return null;
+  }
+}
+
 async function countCohorts(sql) {
-  const restamp = await sql.query(
+  const restampCohort = await safeCount(
+    sql,
     `select count(*)::bigint as n from price_history_points php
      where ${EN_RAW_SNAPSHOT_WHERE} and php.ts >= $1::date`,
     [CUTOFF],
   );
-  const stale = await sql.query(
+  const deleteCohort = await safeCount(
+    sql,
     `select count(*)::bigint as n from price_history_points php
      where ${EN_RAW_SNAPSHOT_WHERE} and php.ts < $1::date`,
     [CUTOFF],
   );
-  // JP sanity: must be left untouched by everything here.
-  const jp = await sql.query(
+  // JP sanity: must be left untouched by everything here. Same RAW
+  // definition as the EN cohorts (true-raw only; graded excluded).
+  const jpUntouched = await safeCount(
+    sql,
     `select count(*)::bigint as n from price_history_points php
      where php.provider = 'SCRYDEX' and php.source_window = 'snapshot'
        and php.variant_ref like '%::RAW'
+       and php.variant_ref not like '%::GRADED::%'
        and exists (
          select 1 from canonical_cards cc
          where cc.slug = php.canonical_slug and upper(cc.language) = 'JP'
        )`,
   );
-  return {
-    restampCohort: Number(restamp.rows[0]?.n ?? 0),
-    deleteCohort: Number(stale.rows[0]?.n ?? 0),
-    jpUntouched: Number(jp.rows[0]?.n ?? 0),
-  };
+  return { restampCohort, deleteCohort, jpUntouched };
 }
 
 // One bounded UPDATE per UTC day. For each EN-RAW variant active that day,
 // take the latest observation's Scrydex `market` (matching downsample's
 // keep-latest semantics) and apply it to that day's snapshot history points.
+// Graded-safe by construction: `dm` is built only from grade='RAW'
+// observations, so dm.variant_ref never contains `::GRADED::`, and the
+// `php.variant_ref = dm.variant_ref` exact match can only hit true-raw rows.
 async function restampDay(sql, day) {
   const result = await sql.query(
     `
