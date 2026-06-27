@@ -97,15 +97,20 @@ if (!["all", "restamp", "delete-stale"].includes(MODE)) {
   process.exit(2);
 }
 
-// Resolve the psql connection: the linked-project pooler URL (no password in
-// it) + SUPABASE_DB_PASSWORD via PGPASSWORD. This is the established prod
-// long-ops path (psql + supabase/.temp/pooler-url + unquoted password).
-function resolvePsqlConnection() {
+// Resolve the psql connection URL with the DB password INJECTED into the URI
+// (mirrors scripts/lib/linked-db.mjs `buildDbUrl`). This is the established
+// prod long-ops path (psql + supabase/.temp/pooler-url + SUPABASE_DB_PASSWORD).
+// We must set the password ON the URL, not rely on PGPASSWORD: the standard
+// linked pooler URL ships a `[YOUR-PASSWORD]` placeholder, and libpq falls
+// back to PGPASSWORD ONLY when the URI has no password component — so a
+// placeholder URI would (mis)authenticate with the literal placeholder and
+// fail before --dry-run. `url.password = …` also URL-encodes special chars.
+function resolvePsqlConnectionUrl() {
   const poolerPath = path.join(ROOT, "supabase", ".temp", "pooler-url");
-  const url = process.env.POSTGRES_URL?.trim().replace(/^["']|["']$/g, "")
+  const raw = process.env.POSTGRES_URL?.trim().replace(/^["']|["']$/g, "")
     || (fs.existsSync(poolerPath) ? fs.readFileSync(poolerPath, "utf8").trim() : "");
   const password = process.env.SUPABASE_DB_PASSWORD?.trim().replace(/^["']|["']$/g, "");
-  if (!url) {
+  if (!raw) {
     console.error("No connection URL. Set POSTGRES_URL or provide supabase/.temp/pooler-url.");
     process.exit(2);
   }
@@ -113,11 +118,19 @@ function resolvePsqlConnection() {
     console.error("Missing SUPABASE_DB_PASSWORD (needed for the pooler login).");
     process.exit(2);
   }
-  return { url, password };
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    console.error("Connection URL is not a valid URI.");
+    process.exit(2);
+  }
+  url.password = password;
+  return url.toString();
 }
 
-const CONN = resolvePsqlConnection();
-const PSQL_ENV = { ...process.env, PGPASSWORD: CONN.password, PGCONNECT_TIMEOUT: "20" };
+const CONN_URL = resolvePsqlConnectionUrl();
+const PSQL_ENV = { ...process.env, PGCONNECT_TIMEOUT: "20" };
 
 // Run a single SQL statement via psql and return its first scalar as a Number.
 // `-tAX`: tuples-only, unaligned, no .psqlrc. ON_ERROR_STOP surfaces SQL
@@ -127,7 +140,7 @@ const PSQL_ENV = { ...process.env, PGPASSWORD: CONN.password, PGCONNECT_TIMEOUT:
 function runScalar(text) {
   const out = execFileSync(
     "psql",
-    [CONN.url, "-tAX", "-v", "ON_ERROR_STOP=1", "-c", `set statement_timeout=0; ${text}`],
+    [CONN_URL, "-tAX", "-v", "ON_ERROR_STOP=1", "-c", `set statement_timeout=0; ${text}`],
     { env: PSQL_ENV, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   // Skip the "SET" command tag; take the last non-empty scalar line.
@@ -136,8 +149,13 @@ function runScalar(text) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// The raw-only / graded-excluded snapshot predicate (see GRADED GOTCHA above).
-const RAW_SNAPSHOT = `php.source_window = 'snapshot'
+// The SCRYDEX raw-only / graded-excluded snapshot predicate (see GRADED
+// GOTCHA above). The `provider = 'SCRYDEX'` scope is REQUIRED here, not just
+// in the mutations: other providers (JUSTTCG, POKEMON_TCG_API, JP feeds) also
+// build `::RAW` snapshot refs, so without it the dry-run counts would include
+// rows the restamp/delete never touch.
+const RAW_SNAPSHOT = `php.provider = 'SCRYDEX'
+  and php.source_window = 'snapshot'
   and php.variant_ref like '%::RAW'
   and php.variant_ref not like '%::GRADED::%'`;
 
@@ -161,7 +179,7 @@ function enSlugCount() {
 function countChunk(offset) {
   const out = execFileSync(
     "psql",
-    [CONN.url, "-tAXF", "|", "-v", "ON_ERROR_STOP=1", "-c",
+    [CONN_URL, "-tAXF", "|", "-v", "ON_ERROR_STOP=1", "-c",
       `set statement_timeout=0;
        select
          count(*) filter (where php.ts >= date '${CUTOFF}'),
@@ -247,7 +265,6 @@ function deleteSlugChunk(offset) {
       where cc.slug = php.canonical_slug
         and (cc.language is null or upper(cc.language) = 'EN')
         and php.canonical_slug = any(${enSlugPage(offset)})
-        and php.provider = 'SCRYDEX'
         and ${RAW_SNAPSHOT}
         and php.ts < date '${CUTOFF}'
       returning 1
