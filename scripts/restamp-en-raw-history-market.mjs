@@ -14,6 +14,9 @@
 //      EN-RAW observation stores Scrydex `market` in
 //      metadata->>'scrydexAskingPriceUsd' (USD; populated on 100% of SCRYDEX
 //      RAW obs). UPDATE each day's history points to that day's market.
+//      Driven per-UTC-day by observations (the obs (provider, observed_at)
+//      index + the price_history_points unique index on
+//      (provider, variant_ref, ts, source_window) keep each day bounded).
 //      Zero Scrydex credits — reads stored data only.
 //
 //   2. DELETE-STALE (ts < CUTOFF): the backing observations were pruned, so
@@ -22,6 +25,12 @@
 //      junk-listing noise the flip removes). We delete these EN-RAW snapshot
 //      points so EN history starts cleanly at CUTOFF on the market basis,
 //      with no internal low->market seam. (User-approved 2026-06-25.)
+//      Driven by canonical_slug CHUNKS (not the whole table): the
+//      `variant_ref LIKE` predicates are NOT sargable, so a table-wide filter
+//      seq-scans all ~7M rows (~15 min) — fatal for a per-batch loop. Instead
+//      we page EN slugs from canonical_cards (OFFSET/LIMIT, small table) and
+//      operate on each chunk's rows via the (canonical_slug, ts) index, so
+//      the LIKE only ever touches a handful of rows per slug (~40s/chunk).
 //
 // Scope guards (EN-only, never touch JP/graded):
 //   - `source_window='snapshot'`, `variant_ref LIKE '%::RAW'` AND
@@ -29,33 +38,39 @@
 //     end in `::RAW` (the grade is encoded earlier, as
 //     `...::GRADED::PSA::G10::RAW`), so the `::RAW` suffix alone is NOT
 //     raw-only — the `::GRADED::` exclusion is what makes it raw-only.
-//   - canonical_cards.language NULL or 'EN' (NULL is EN-managed per migration
-//     20260612014500). JP RAW change columns are owned by
-//     compute_jp_card_price_changes — explicitly excluded here.
+//   - EN-managed slugs = canonical_cards.language NULL or 'EN' (NULL is
+//     EN-managed per migration 20260612014500). JP RAW change columns are
+//     owned by compute_jp_card_price_changes — excluded by paging only EN
+//     slugs AND (defense in depth) the language guard in each statement.
 //
 // Idempotent + resumable: the re-stamp skips no-op rows
 // (`price IS DISTINCT FROM`), and re-running re-applies the same market /
-// re-deletes an already-empty cohort. Each statement auto-commits and is
-// bounded (per-day UPDATE, ctid-batched DELETE) so it survives statement
-// timeouts and can be stopped/restarted at any point.
+// re-deletes an already-empty cohort. Every statement auto-commits (psql -c)
+// and is bounded (per-day UPDATE, per-slug-chunk DELETE) so it survives
+// statement timeouts and can be stopped/restarted at any point. `SET
+// statement_timeout=0` is prepended as a safety margin for an occasional slow
+// day/chunk; it is NOT a license for unbounded work — bounding comes from the
+// per-day / per-chunk scoping.
+//
+// Transport: psql against the Supabase pooler (the proven prod long-ops
+// path). @vercel/postgres is NOT usable here — it bundles the Neon
+// serverless WebSocket driver, which cannot speak to the Supabase pooler.
 //
 // Run AFTER PR #310 is merged. ORDER OF OPERATIONS (see runbook in the PR):
 //   restamp + delete-stale  ->  refresh card_metrics rollups for touched EN
 //   slugs  ->  refresh_canonical_trusted_raw_prices.
 //
-// Usage:
-//   node scripts/restamp-en-raw-history-market.mjs --dry-run
-//   node scripts/restamp-en-raw-history-market.mjs --mode=restamp
-//   node scripts/restamp-en-raw-history-market.mjs --mode=delete-stale
-//   node scripts/restamp-en-raw-history-market.mjs --mode=all
-//   (flags: --cutoff=YYYY-MM-DD  --batch=50000  --dry-run)
-//
-// Requires POSTGRES_URL pointing at Supabase prod (same connection the
-// scan route uses). Falls back to building it from
-// supabase/.temp/pooler-url + SUPABASE_DB_PASSWORD.
+// Usage (from the repo root, with .env.local providing SUPABASE_DB_PASSWORD
+// and supabase/.temp/pooler-url present):
+//   npm run restamp:en-raw-history -- --dry-run
+//   npm run restamp:en-raw-history -- --mode=restamp
+//   npm run restamp:en-raw-history -- --mode=delete-stale
+//   npm run restamp:en-raw-history -- --mode=all
+//   (flags: --cutoff=YYYY-MM-DD  --chunk=1000  --dry-run)
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -63,13 +78,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DRY_RUN = process.argv.includes("--dry-run");
 const MODE = (process.argv.find((a) => a.startsWith("--mode="))?.split("=")[1] ?? "all").trim();
 const CUTOFF = (process.argv.find((a) => a.startsWith("--cutoff="))?.split("=")[1] ?? "2026-05-31").trim();
-const DELETE_BATCH = Number.parseInt(
-  process.argv.find((a) => a.startsWith("--batch="))?.split("=")[1] ?? "50000",
+const SLUG_CHUNK = Number.parseInt(
+  process.argv.find((a) => a.startsWith("--chunk="))?.split("=")[1] ?? "1000",
   10,
 );
 
+// CUTOFF is interpolated into SQL, so it MUST be a strict date literal.
 if (!/^\d{4}-\d{2}-\d{2}$/.test(CUTOFF)) {
   console.error(`Invalid --cutoff (expected YYYY-MM-DD): ${CUTOFF}`);
+  process.exit(2);
+}
+if (!Number.isInteger(SLUG_CHUNK) || SLUG_CHUNK <= 0 || SLUG_CHUNK > 20000) {
+  console.error(`Invalid --chunk (expected positive integer <= 20000): ${SLUG_CHUNK}`);
   process.exit(2);
 }
 if (!["all", "restamp", "delete-stale"].includes(MODE)) {
@@ -77,96 +97,96 @@ if (!["all", "restamp", "delete-stale"].includes(MODE)) {
   process.exit(2);
 }
 
-function resolvePostgresUrl() {
-  const direct = process.env.POSTGRES_URL?.trim().replace(/^["']|["']$/g, "");
-  if (direct) {
-    process.env.POSTGRES_URL = direct;
-    return direct;
-  }
-  // Build from the linked-project pooler URL + DB password (the prod
-  // long-ops path). pooler-url looks like:
-  //   postgresql://postgres.<ref>:[YOUR-PASSWORD]@<host>:6543/postgres
+// Resolve the psql connection: the linked-project pooler URL (no password in
+// it) + SUPABASE_DB_PASSWORD via PGPASSWORD. This is the established prod
+// long-ops path (psql + supabase/.temp/pooler-url + unquoted password).
+function resolvePsqlConnection() {
   const poolerPath = path.join(ROOT, "supabase", ".temp", "pooler-url");
+  const url = process.env.POSTGRES_URL?.trim().replace(/^["']|["']$/g, "")
+    || (fs.existsSync(poolerPath) ? fs.readFileSync(poolerPath, "utf8").trim() : "");
   const password = process.env.SUPABASE_DB_PASSWORD?.trim().replace(/^["']|["']$/g, "");
-  if (fs.existsSync(poolerPath) && password) {
-    const template = fs.readFileSync(poolerPath, "utf8").trim();
-    const url = template.replace(/\[YOUR-PASSWORD\]|\[YOUR-PASSWORD-HERE\]/i, encodeURIComponent(password));
-    if (url && !/\[YOUR-PASSWORD/i.test(url)) {
-      process.env.POSTGRES_URL = url;
-      return url;
-    }
+  if (!url) {
+    console.error("No connection URL. Set POSTGRES_URL or provide supabase/.temp/pooler-url.");
+    process.exit(2);
   }
-  console.error(
-    "No POSTGRES_URL. Set POSTGRES_URL to the Supabase prod connection string, " +
-      "or provide SUPABASE_DB_PASSWORD with supabase/.temp/pooler-url present.",
-  );
-  process.exit(2);
+  if (!password) {
+    console.error("Missing SUPABASE_DB_PASSWORD (needed for the pooler login).");
+    process.exit(2);
+  }
+  return { url, password };
 }
 
-// Filters shared by the cohort counts and the delete so they stay aligned.
-// EN-managed = canonical_cards.language NULL or 'EN'.
-//
-// GRADED GOTCHA: `buildProviderHistoryVariantRef` appends `::RAW` to EVERY
-// snapshot ref, including graded ones whose provider_variant_id encodes the
-// grade as `...::GRADED::<company>::<bucket>` — so graded refs look like
-// `<printing>::<setcode>:<finish>::GRADED::PSA::G10::RAW` and ALSO match
-// `LIKE '%::RAW'`. Prod has ~4.6M such graded snapshot rows. We must exclude
-// them or the delete would hard-remove EN graded history. The structural
-// token is the delimited, upper-case `::GRADED::` — use `NOT LIKE` (not
-// ILIKE) so a card whose slug merely contains the substring "graded" stays.
-const EN_RAW_SNAPSHOT_WHERE = `
-  php.provider = 'SCRYDEX'
-  and php.source_window = 'snapshot'
+const CONN = resolvePsqlConnection();
+const PSQL_ENV = { ...process.env, PGPASSWORD: CONN.password, PGCONNECT_TIMEOUT: "20" };
+
+// Run a single SQL statement via psql and return its first scalar as a Number.
+// `-tAX`: tuples-only, unaligned, no .psqlrc. ON_ERROR_STOP surfaces SQL
+// errors as a non-zero exit. SQL passed as one argv (no shell) so quotes/`%`
+// are safe. `set statement_timeout=0` prepended as a per-session safety
+// margin (each psql -c is its own session).
+function runScalar(text) {
+  const out = execFileSync(
+    "psql",
+    [CONN.url, "-tAX", "-v", "ON_ERROR_STOP=1", "-c", `set statement_timeout=0; ${text}`],
+    { env: PSQL_ENV, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  // Skip the "SET" command tag; take the last non-empty scalar line.
+  const lines = out.split("\n").map((l) => l.trim()).filter((l) => l && l !== "SET");
+  const n = Number(lines.at(-1));
+  return Number.isFinite(n) ? n : 0;
+}
+
+// The raw-only / graded-excluded snapshot predicate (see GRADED GOTCHA above).
+const RAW_SNAPSHOT = `php.source_window = 'snapshot'
   and php.variant_ref like '%::RAW'
-  and php.variant_ref not like '%::GRADED::%'
-  and exists (
-    select 1 from canonical_cards cc
-    where cc.slug = php.canonical_slug
-      and (cc.language is null or upper(cc.language) = 'EN')
-  )
-`;
+  and php.variant_ref not like '%::GRADED::%'`;
 
-// These full count(*) scans (7M+ rows) are informational only — the
-// re-stamp/delete are bounded + self-reporting and never depend on them. If a
-// count hits the role statement_timeout, return null and keep going rather
-// than aborting the real work.
-async function safeCount(sql, text, params = []) {
-  try {
-    const result = await sql.query(text, params);
-    return Number(result.rows[0]?.n ?? 0);
-  } catch (error) {
-    console.warn(JSON.stringify({ phase: "count", warn: "count failed (non-fatal)", message: String(error?.message ?? error) }));
-    return null;
-  }
+// EN-slug page subquery: stable order, paged from the small canonical_cards
+// table. EN-managed = language NULL or 'EN'.
+function enSlugPage(offset) {
+  return `array(
+    select slug from canonical_cards
+    where (language is null or upper(language) = 'EN')
+    order by slug offset ${offset} limit ${SLUG_CHUNK}
+  )`;
 }
 
-async function countCohorts(sql) {
-  const restampCohort = await safeCount(
-    sql,
-    `select count(*)::bigint as n from price_history_points php
-     where ${EN_RAW_SNAPSHOT_WHERE} and php.ts >= $1::date`,
-    [CUTOFF],
+function enSlugCount() {
+  return runScalar(
+    `select count(*)::bigint from canonical_cards where (language is null or upper(language) = 'EN')`,
   );
-  const deleteCohort = await safeCount(
-    sql,
-    `select count(*)::bigint as n from price_history_points php
-     where ${EN_RAW_SNAPSHOT_WHERE} and php.ts < $1::date`,
-    [CUTOFF],
+}
+
+// Count both cohorts for one EN-slug chunk via the (canonical_slug, ts) index.
+function countChunk(offset) {
+  const out = execFileSync(
+    "psql",
+    [CONN.url, "-tAXF", "|", "-v", "ON_ERROR_STOP=1", "-c",
+      `set statement_timeout=0;
+       select
+         count(*) filter (where php.ts >= date '${CUTOFF}'),
+         count(*) filter (where php.ts < date '${CUTOFF}')
+       from price_history_points php
+       where php.canonical_slug = any(${enSlugPage(offset)})
+         and ${RAW_SNAPSHOT}`],
+    { env: PSQL_ENV, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
-  // JP sanity: must be left untouched by everything here. Same RAW
-  // definition as the EN cohorts (true-raw only; graded excluded).
-  const jpUntouched = await safeCount(
-    sql,
-    `select count(*)::bigint as n from price_history_points php
-     where php.provider = 'SCRYDEX' and php.source_window = 'snapshot'
-       and php.variant_ref like '%::RAW'
-       and php.variant_ref not like '%::GRADED::%'
-       and exists (
-         select 1 from canonical_cards cc
-         where cc.slug = php.canonical_slug and upper(cc.language) = 'JP'
-       )`,
-  );
-  return { restampCohort, deleteCohort, jpUntouched };
+  const row = out.split("\n").map((l) => l.trim()).filter((l) => l && l !== "SET").at(-1) ?? "0|0";
+  const [restamp, del] = row.split("|").map((v) => Number(v) || 0);
+  return { restamp, del };
+}
+
+function countCohorts() {
+  const total = enSlugCount();
+  let restampCohort = 0;
+  let deleteCohort = 0;
+  for (let offset = 0; offset < total; offset += SLUG_CHUNK) {
+    const { restamp, del } = countChunk(offset);
+    restampCohort += restamp;
+    deleteCohort += del;
+    console.log(JSON.stringify({ phase: "count", offset, restampCohort, deleteCohort }));
+  }
+  return { restampCohort, deleteCohort, enSlugs: total };
 }
 
 // One bounded UPDATE per UTC day. For each EN-RAW variant active that day,
@@ -175,59 +195,66 @@ async function countCohorts(sql) {
 // Graded-safe by construction: `dm` is built only from grade='RAW'
 // observations, so dm.variant_ref never contains `::GRADED::`, and the
 // `php.variant_ref = dm.variant_ref` exact match can only hit true-raw rows.
-async function restampDay(sql, day) {
-  const result = await sql.query(
+function restampDay(day) {
+  return runScalar(
     `
-    update price_history_points php
-    set price = dm.market_usd, currency = 'USD'
-    from (
-      select distinct on (variant_ref)
-        coalesce(nullif(pcm.printing_id::text, ''), pcm.canonical_slug)
-          || '::' || o.provider_variant_id || '::RAW' as variant_ref,
-        (o.metadata->>'scrydexAskingPriceUsd')::numeric as market_usd
-      from provider_normalized_observations o
-      join provider_card_map pcm
-        on pcm.provider = 'SCRYDEX'
-       and pcm.provider_key = o.provider_card_id || '::' || o.provider_variant_id
-       and pcm.mapping_status = 'MATCHED'
-       and pcm.canonical_slug is not null
-      join canonical_cards cc on cc.slug = pcm.canonical_slug
-      where o.provider = 'SCRYDEX'
-        and o.metadata->>'grade' = 'RAW'
-        and (o.metadata->>'scrydexAskingPriceUsd') is not null
-        and (o.metadata->>'scrydexAskingPriceUsd')::numeric > 0
-        and lower(o.normalized_condition) in ('nm', 'mint')
-        and (cc.language is null or upper(cc.language) = 'EN')
-        and o.observed_at >= $1::date and o.observed_at < ($1::date + 1)
-      order by variant_ref, o.observed_at desc
-    ) dm
-    where php.provider = 'SCRYDEX'
-      and php.source_window = 'snapshot'
-      and php.variant_ref = dm.variant_ref
-      and php.ts >= $1::date and php.ts < ($1::date + 1)
-      and php.price is distinct from dm.market_usd
+    with upd as (
+      update price_history_points php
+      set price = dm.market_usd, currency = 'USD'
+      from (
+        select distinct on (variant_ref)
+          coalesce(nullif(pcm.printing_id::text, ''), pcm.canonical_slug)
+            || '::' || o.provider_variant_id || '::RAW' as variant_ref,
+          (o.metadata->>'scrydexAskingPriceUsd')::numeric as market_usd
+        from provider_normalized_observations o
+        join provider_card_map pcm
+          on pcm.provider = 'SCRYDEX'
+         and pcm.provider_key = o.provider_card_id || '::' || o.provider_variant_id
+         and pcm.mapping_status = 'MATCHED'
+         and pcm.canonical_slug is not null
+        join canonical_cards cc on cc.slug = pcm.canonical_slug
+        where o.provider = 'SCRYDEX'
+          and o.metadata->>'grade' = 'RAW'
+          and (o.metadata->>'scrydexAskingPriceUsd') is not null
+          and (o.metadata->>'scrydexAskingPriceUsd')::numeric > 0
+          and lower(o.normalized_condition) in ('nm', 'mint')
+          and (cc.language is null or upper(cc.language) = 'EN')
+          and o.observed_at >= date '${day}' and o.observed_at < (date '${day}' + 1)
+        order by variant_ref, o.observed_at desc
+      ) dm
+      where php.provider = 'SCRYDEX'
+        and php.source_window = 'snapshot'
+        and php.variant_ref = dm.variant_ref
+        and php.ts >= date '${day}' and php.ts < (date '${day}' + 1)
+        and php.price is distinct from dm.market_usd
+      returning 1
+    )
+    select count(*)::bigint from upd
     `,
-    [day],
   );
-  return result.rowCount ?? 0;
 }
 
-// ctid-batched DELETE so each statement removes at most DELETE_BATCH rows and
-// auto-commits — bounded regardless of how the stale cohort is distributed.
-async function deleteStaleBatch(sql) {
-  const result = await sql.query(
+// DELETE one EN-slug chunk's pre-cutoff true-raw snapshot points, driven by
+// the (canonical_slug, ts) index so the LIKE only touches each slug's rows.
+// The language guard is redundant with the EN-only paging but kept as defense
+// in depth so a stray non-EN slug can never be deleted.
+function deleteSlugChunk(offset) {
+  return runScalar(
     `
-    delete from price_history_points
-    where ctid = any(array(
-      select php.ctid
-      from price_history_points php
-      where ${EN_RAW_SNAPSHOT_WHERE} and php.ts < $1::date
-      limit $2
-    ))
+    with del as (
+      delete from price_history_points php
+      using canonical_cards cc
+      where cc.slug = php.canonical_slug
+        and (cc.language is null or upper(cc.language) = 'EN')
+        and php.canonical_slug = any(${enSlugPage(offset)})
+        and php.provider = 'SCRYDEX'
+        and ${RAW_SNAPSHOT}
+        and php.ts < date '${CUTOFF}'
+      returning 1
+    )
+    select count(*)::bigint from del
     `,
-    [CUTOFF, DELETE_BATCH],
   );
-  return result.rowCount ?? 0;
 }
 
 function* eachUtcDay(fromIso, toIso) {
@@ -242,20 +269,17 @@ function* eachUtcDay(fromIso, toIso) {
   }
 }
 
-async function main() {
-  resolvePostgresUrl();
-  const { sql } = await import("@vercel/postgres");
-
-  const counts = await countCohorts(sql);
-  console.log(JSON.stringify({ phase: "cohorts", cutoff: CUTOFF, mode: MODE, ...counts }));
-
+function main() {
   if (DRY_RUN) {
+    const counts = countCohorts();
     console.log(JSON.stringify({
       ok: true,
       dryRun: true,
+      cutoff: CUTOFF,
+      mode: MODE,
       wouldRestamp: ["all", "restamp"].includes(MODE) ? counts.restampCohort : 0,
       wouldDelete: ["all", "delete-stale"].includes(MODE) ? counts.deleteCohort : 0,
-      jpUntouched: counts.jpUntouched,
+      enSlugs: counts.enSlugs,
     }, null, 2));
     return;
   }
@@ -266,31 +290,27 @@ async function main() {
   if (["all", "restamp"].includes(MODE)) {
     const today = new Date().toISOString().slice(0, 10);
     for (const day of eachUtcDay(CUTOFF, today)) {
-      const n = await restampDay(sql, day);
+      const n = restampDay(day);
       totalRestamped += n;
       console.log(JSON.stringify({ phase: "restamp", day, rowsUpdated: n, totalRestamped }));
     }
   }
 
   if (["all", "delete-stale"].includes(MODE)) {
-    for (;;) {
-      const n = await deleteStaleBatch(sql);
+    const total = enSlugCount();
+    for (let offset = 0; offset < total; offset += SLUG_CHUNK) {
+      const n = deleteSlugChunk(offset);
       totalDeleted += n;
-      console.log(JSON.stringify({ phase: "delete-stale", rowsDeleted: n, totalDeleted }));
-      if (n === 0) break;
+      console.log(JSON.stringify({ phase: "delete-stale", offset, rowsDeleted: n, totalDeleted }));
     }
   }
 
-  const after = await countCohorts(sql);
-  console.log(JSON.stringify({
-    ok: true,
-    totalRestamped,
-    totalDeleted,
-    remaining: after,
-  }, null, 2));
+  console.log(JSON.stringify({ ok: true, mode: MODE, cutoff: CUTOFF, totalRestamped, totalDeleted }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error?.stack ?? error);
+try {
+  main();
+} catch (error) {
+  console.error(String(error?.stderr ?? error?.stack ?? error));
   process.exit(1);
-});
+}
