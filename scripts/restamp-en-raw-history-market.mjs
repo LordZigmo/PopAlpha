@@ -19,18 +19,23 @@
 //      (provider, variant_ref, ts, source_window) keep each day bounded).
 //      Zero Scrydex credits — reads stored data only.
 //
-//   2. DELETE-STALE (ts < CUTOFF): the backing observations were pruned, so
-//      no trustworthy market value exists. We DO NOT fabricate one (the
-//      per-variant low->market ratio is unstable — that volatility is the
-//      junk-listing noise the flip removes). We delete these EN-RAW snapshot
-//      points so EN history starts cleanly at CUTOFF on the market basis,
-//      with no internal low->market seam. (User-approved 2026-06-25.)
-//      Driven by canonical_slug CHUNKS (not the whole table): the
-//      `variant_ref LIKE` predicates are NOT sargable, so a table-wide filter
-//      seq-scans all ~7M rows (~15 min) — fatal for a per-batch loop. Instead
-//      we page EN slugs from canonical_cards (OFFSET/LIMIT, small table) and
-//      operate on each chunk's rows via the (canonical_slug, ts) index, so
-//      the LIKE only ever touches a handful of rows per slug (~40s/chunk).
+//   2. DELETE-STALE (ts < CUTOFF) — OPT-IN, NOT the default. The backing
+//      observations were pruned, so no trustworthy market value exists, and
+//      we will NOT fabricate one (the per-variant low->market ratio is
+//      unstable — that volatility is the junk-listing noise the flip
+//      removes). By default these pre-CUTOFF points are LEFT IN PLACE on
+//      their old `low` basis (decision 2026-06-27: reversible > a one-shot
+//      1.6M-row delete). Effect: on cards where low != market a one-time
+//      visual "seam" remains in the deep chart history at CUTOFF, but the
+//      seam ages out of the rolling 30d/90d windows over time, and the
+//      headline / change badges / trusted-price all read recent (post-CUTOFF)
+//      data so they are already correct. `--mode=delete-stale` is available
+//      if the seam ever proves worth removing. When run, it is driven by
+//      canonical_slug CHUNKS (not the whole table): the `variant_ref LIKE`
+//      predicates are NOT sargable, so a table-wide filter seq-scans all ~7M
+//      rows (~15 min) — fatal for a per-batch loop. Instead we page EN slugs
+//      from canonical_cards (OFFSET/LIMIT, small table) and operate on each
+//      chunk's rows via the (canonical_slug, ts) index (~40s/chunk).
 //
 // Scope guards (EN-only, never touch JP/graded):
 //   - `source_window='snapshot'`, `variant_ref LIKE '%::RAW'` AND
@@ -57,16 +62,19 @@
 // serverless WebSocket driver, which cannot speak to the Supabase pooler.
 //
 // Run AFTER PR #310 is merged. ORDER OF OPERATIONS (see runbook in the PR):
-//   restamp + delete-stale  ->  refresh card_metrics rollups for touched EN
-//   slugs  ->  refresh_canonical_trusted_raw_prices.
+//   restamp (default)  ->  refresh card_metrics rollups for touched EN slugs
+//   ->  refresh_canonical_trusted_raw_prices. delete-stale is opt-in and not
+//   part of the default flow.
 //
 // Usage (from the repo root, with .env.local providing SUPABASE_DB_PASSWORD
 // and supabase/.temp/pooler-url present):
-//   npm run restamp:en-raw-history -- --dry-run
-//   npm run restamp:en-raw-history -- --mode=restamp
-//   npm run restamp:en-raw-history -- --mode=delete-stale
-//   npm run restamp:en-raw-history -- --mode=all
-//   (flags: --cutoff=YYYY-MM-DD  --chunk=1000  --dry-run)
+//   npm run restamp:en-raw-history -- --dry-run          # preview (default mode)
+//   npm run restamp:en-raw-history                        # restamp (default)
+//   npm run restamp:en-raw-history -- --mode=delete-stale # OPT-IN cleanup
+//   (flags: --mode=restamp|delete-stale|all  --cutoff=YYYY-MM-DD  --chunk=1000  --dry-run)
+//
+// DEFAULT MODE IS `restamp` (pre-CUTOFF points are intentionally left in
+// place). Pass --mode=delete-stale or --mode=all only to remove them.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -76,7 +84,9 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const DRY_RUN = process.argv.includes("--dry-run");
-const MODE = (process.argv.find((a) => a.startsWith("--mode="))?.split("=")[1] ?? "all").trim();
+// Default is `restamp` only — pre-CUTOFF points are left in place unless an
+// operator explicitly opts into delete-stale / all.
+const MODE = (process.argv.find((a) => a.startsWith("--mode="))?.split("=")[1] ?? "restamp").trim();
 const CUTOFF = (process.argv.find((a) => a.startsWith("--cutoff="))?.split("=")[1] ?? "2026-05-31").trim();
 const SLUG_CHUNK = Number.parseInt(
   process.argv.find((a) => a.startsWith("--chunk="))?.split("=")[1] ?? "1000",
