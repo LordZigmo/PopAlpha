@@ -97,15 +97,17 @@ if (!["all", "restamp", "delete-stale"].includes(MODE)) {
   process.exit(2);
 }
 
-// Resolve the psql connection URL with the DB password INJECTED into the URI
-// (mirrors scripts/lib/linked-db.mjs `buildDbUrl`). This is the established
-// prod long-ops path (psql + supabase/.temp/pooler-url + SUPABASE_DB_PASSWORD).
-// We must set the password ON the URL, not rely on PGPASSWORD: the standard
-// linked pooler URL ships a `[YOUR-PASSWORD]` placeholder, and libpq falls
-// back to PGPASSWORD ONLY when the URI has no password component — so a
-// placeholder URI would (mis)authenticate with the literal placeholder and
-// fail before --dry-run. `url.password = …` also URL-encodes special chars.
-function resolvePsqlConnectionUrl() {
+// Resolve the psql connection. This is the established prod long-ops path
+// (psql + supabase/.temp/pooler-url + SUPABASE_DB_PASSWORD). Two constraints
+// pull in opposite directions, so we satisfy both:
+//   - The password must NOT appear in psql's argv (visible via `ps`), so it
+//     goes out-of-band via PGPASSWORD, never on the URL.
+//   - libpq falls back to PGPASSWORD ONLY when the URI carries no password
+//     component — and the standard linked pooler-url ships a `[YOUR-PASSWORD]`
+//     placeholder, which would otherwise (mis)authenticate as the literal
+//     placeholder. So we STRIP any password/placeholder off the URI.
+// Net: a password-free URI in argv + the real secret in PGPASSWORD.
+function resolvePsqlConnection() {
   const poolerPath = path.join(ROOT, "supabase", ".temp", "pooler-url");
   const raw = process.env.POSTGRES_URL?.trim().replace(/^["']|["']$/g, "")
     || (fs.existsSync(poolerPath) ? fs.readFileSync(poolerPath, "utf8").trim() : "");
@@ -125,12 +127,13 @@ function resolvePsqlConnectionUrl() {
     console.error("Connection URL is not a valid URI.");
     process.exit(2);
   }
-  url.password = password;
-  return url.toString();
+  url.password = "";
+  return { url: url.toString(), password };
 }
 
-const CONN_URL = resolvePsqlConnectionUrl();
-const PSQL_ENV = { ...process.env, PGCONNECT_TIMEOUT: "20" };
+const CONN = resolvePsqlConnection();
+const CONN_URL = CONN.url;
+const PSQL_ENV = { ...process.env, PGPASSWORD: CONN.password, PGCONNECT_TIMEOUT: "20" };
 
 // Run a single SQL statement via psql and return its first scalar as a Number.
 // `-tAX`: tuples-only, unaligned, no .psqlrc. ON_ERROR_STOP surfaces SQL
