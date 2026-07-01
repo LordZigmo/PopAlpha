@@ -51,6 +51,13 @@ final class AuthService {
 
     private var tokenRefreshTask: Task<Void, Never>?
 
+    /// Background session-recovery task spawned by the transient cold-launch
+    /// mint-failure path. Held so sign-out can cancel it — otherwise a slow or
+    /// offline sign-out (Clerk's signOut runs fire-and-forget) could let the
+    /// loop mint from the captured session and silently re-authenticate a user
+    /// who just signed out. Codex P2 on #313.
+    private var restoreRetryTask: Task<Void, Never>?
+
     private init() {}
 
     // MARK: - Sign In (providers)
@@ -389,6 +396,11 @@ final class AuthService {
             try? await Clerk.shared.auth.signOut()
         }
         stopTokenRefresh()
+        // Cancel any in-flight background session recovery so a transient
+        // cold-launch retry can't mint from the captured session and undo this
+        // sign-out (Codex P2 on #313).
+        restoreRetryTask?.cancel()
+        restoreRetryTask = nil
         isAuthenticated = false
         authToken = nil
         currentUserId = nil
@@ -504,16 +516,23 @@ final class AuthService {
     /// once connectivity returns — no re-login. Bounded so a truly dead
     /// session doesn't spin forever; the next cold launch retries fresh.
     private func retryRestoreInBackground(session: Session, user: User) {
-        Task { [weak self] in
+        restoreRetryTask?.cancel()
+        restoreRetryTask = Task { [weak self] in
             guard let self else { return }
             for delay in [2, 4, 8, 15, 30] {
                 try? await Task.sleep(for: .seconds(delay))
+                if Task.isCancelled { return }
                 // Another path (e.g. a manual sign-in) may have won.
                 let alreadyAuthed = await MainActor.run { self.isAuthenticated }
                 if alreadyAuthed { return }
                 if let token = try? await session.getToken(), !token.isEmpty {
-                    await self.applyHealthyRestore(user: user, token: token)
-                    Logger.auth.debug("restore: background retry succeeded — session recovered without re-login")
+                    // respectCancellation: the commit + cancellation check happen
+                    // in the same MainActor turn as signOut(), so a sign-out that
+                    // fired while we were minting wins — we never re-authenticate
+                    // a user who just signed out.
+                    if await self.applyHealthyRestore(user: user, token: token, respectCancellation: true) {
+                        Logger.auth.debug("restore: background retry succeeded — session recovered without re-login")
+                    }
                     return
                 }
             }
@@ -545,18 +564,28 @@ final class AuthService {
     /// Apply a successful cold-launch restore to local state and kick
     /// off the side-effects (handle fetch, push registration, analytics).
     /// Pulled out of `restoreSession` so the healthy path stays linear.
-    private func applyHealthyRestore(user: User, token: String) async {
+    ///
+    /// `respectCancellation` is set by the background-retry caller: the commit
+    /// (setSession) and the cancellation check run in the same MainActor turn
+    /// as `signOut()`, so a sign-out that cancelled this task wins the race and
+    /// we skip the restore instead of resurrecting a signed-out session.
+    /// Returns whether the session was actually committed.
+    @discardableResult
+    private func applyHealthyRestore(user: User, token: String, respectCancellation: Bool = false) async -> Bool {
         let userId = user.id
         let firstName = user.firstName
         let email = user.primaryEmailAddress?.emailAddress
         let imageUrl = user.imageUrl
 
-        await MainActor.run {
+        let committed = await MainActor.run { () -> Bool in
+            if respectCancellation && Task.isCancelled { return false }
             setSession(token: token, userId: userId, handle: nil)
             currentFirstName = firstName
             currentImageURL = imageUrl
             startTokenRefresh()
+            return true
         }
+        guard committed else { return false }
 
         // Re-identify on cold launch so events from this session
         // attribute to the correct user. No signed-in event is fired
@@ -573,6 +602,7 @@ final class AuthService {
         // registration so the server gets a fresh device token every
         // cold launch. PushService dedupes if the token hasn't rotated.
         await PushService.shared.requestAuthorizationIfNeeded()
+        return true
     }
 
     // MARK: - Token Refresh
