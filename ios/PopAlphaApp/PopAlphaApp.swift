@@ -177,9 +177,9 @@ private struct RootView: View {
                         } else {
                             // Re-attempt restore on foreground so a valid cached
                             // session that couldn't mint while offline recovers
-                            // without a process restart. No-op if genuinely
-                            // signed out (restoreSession returns fast).
-                            Task { await AuthService.shared.restoreSession() }
+                            // without a process restart. Guarded so it never
+                            // resurrects an explicit sign-out.
+                            Task { await AuthService.shared.recoverSessionIfNeeded() }
                         }
                     case .background:
                         NotificationService.shared.stopPolling()
@@ -190,8 +190,10 @@ private struct RootView: View {
                 .onChange(of: reachability.isOnline) { wasOnline, isOnline in
                     // Connectivity just returned → recover a valid session that
                     // couldn't mint a token while the launch was offline.
-                    guard !wasOnline, isOnline, !AuthService.shared.isAuthenticated else { return }
-                    Task { await AuthService.shared.restoreSession() }
+                    // recoverSessionIfNeeded() is a no-op after an explicit
+                    // sign-out or when already signed in.
+                    guard !wasOnline, isOnline else { return }
+                    Task { await AuthService.shared.recoverSessionIfNeeded() }
                 }
 
             if showSplash {

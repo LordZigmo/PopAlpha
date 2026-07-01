@@ -64,6 +64,15 @@ final class AuthService {
     /// without making the whole method MainActor-isolated.
     private var isRestoreInFlight = false
 
+    /// Set true by an explicit user sign-out, cleared by the next explicit
+    /// sign-in. Suppresses the foreground / connectivity auto-recovery so it
+    /// can never resurrect a session the user deliberately signed out of (the
+    /// local Clerk session can linger until its fire-and-forget — or offline —
+    /// signOut completes). The launch `.task` restore is intentionally NOT
+    /// gated by this: a fresh process with a genuinely cleared session finds
+    /// nothing to restore. Codex P1 on #313.
+    private var didSignOutThisRun = false
+
     private init() {}
 
     // MARK: - Sign In (providers)
@@ -182,6 +191,8 @@ final class AuthService {
         currentFirstName = firstName
         currentImageURL = imageUrl
         startTokenRefresh()
+        // A confirmed explicit sign-in re-enables auto-recovery for this run.
+        didSignOutThisRun = false
 
         // Attribute subsequent PostHog events to this Clerk user so
         // iOS activity lands on the same person as the user's web
@@ -407,6 +418,10 @@ final class AuthService {
         // sign-out (Codex P2 on #313).
         restoreRetryTask?.cancel()
         restoreRetryTask = nil
+        // Latch the explicit sign-out so foreground / connectivity auto-recovery
+        // can't re-authenticate before Clerk's (fire-and-forget, possibly
+        // offline) signOut fully clears the session. Cleared on next sign-in.
+        didSignOutThisRun = true
         isAuthenticated = false
         authToken = nil
         currentUserId = nil
@@ -422,6 +437,17 @@ final class AuthService {
         // anonymous distinct_id for subsequent events.
         AnalyticsService.shared.capture(.userSignedOut)
         AnalyticsService.shared.reset()
+    }
+
+    /// Foreground / connectivity-restored entry point for cold-launch recovery.
+    /// Unlike the launch `.task`, this must NOT run after an explicit sign-out
+    /// (it would re-authenticate a user who just signed out) or while a sign-in
+    /// is already in progress. No-op in those cases; otherwise defers to
+    /// `restoreSession()` (which is itself reentrancy-guarded).
+    @MainActor
+    func recoverSessionIfNeeded() async {
+        guard !isAuthenticated, !isSigningIn, !didSignOutThisRun else { return }
+        await restoreSession()
     }
 
     // MARK: - Session Restoration (cold launch)
