@@ -472,25 +472,33 @@ final class AuthService {
             return
         }
 
-        // No active session resolved. If the client still holds orphan
-        // credential(s), every future signIn 400s with `session_exists` and
-        // every API call 401s until we tear them down — the one case where
-        // teardown is correct, and safe here since there's no active
-        // `session` object to preserve.
-        if !clientSessions.isEmpty {
+        // Tear down orphan credential(s) ONLY when there is genuinely no active
+        // `session` to preserve. Guarding on `session == nil` (not merely on
+        // `user` being absent) is essential: if `session` resolved but `user`
+        // hasn't yet, the healthy branch above is skipped, and clearing here
+        // would sign out a VALID session — re-introducing the Keychain-deletion
+        // race for the `session != nil && user == nil` window (Codex P2 on
+        // #313). With no active session, leftover client credentials otherwise
+        // 400 every future signIn with `session_exists`, so teardown is correct
+        // and safe.
+        if session == nil, !clientSessions.isEmpty {
             Logger.auth.debug("restore: orphan client sessions, no active session — clearing")
             await clearOrphanClientSessions(clientSessions)
         }
     }
 
-    /// Poll for the active session to resolve after `isLoaded`. The SDK can
-    /// report `isLoaded == true` a beat before `Clerk.shared.session` is
-    /// populated; without this wait a cold launch races that gap and misreads
-    /// a valid session as absent — the core overnight-logout trigger.
+    /// Poll for the active session AND its user to resolve after `isLoaded`.
+    /// The SDK can report `isLoaded == true` a beat before `Clerk.shared.session`
+    /// is populated, and can surface `session` a beat before `user`. The
+    /// healthy-restore branch needs BOTH; waiting only on `session` left a
+    /// `session != nil && user == nil` window that skipped the healthy branch
+    /// and fell into orphan teardown, deleting a valid Keychain session (the
+    /// overnight-logout bug; Codex P2 on #313). Bounded by the timeout so a
+    /// genuinely signed-out launch doesn't stall.
     private func waitForActiveSession(timeout: Duration = .seconds(3)) async {
         let deadline = ContinuousClock.now.advanced(by: timeout)
         while ContinuousClock.now < deadline {
-            if await Clerk.shared.session != nil { return }
+            if await Clerk.shared.session != nil, await Clerk.shared.user != nil { return }
             try? await Task.sleep(for: .milliseconds(50))
         }
     }
