@@ -101,6 +101,11 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
 private struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSplash = true
+    /// Observed so a cold-launch restore can re-fire when connectivity returns.
+    /// A launch that stays offline past the background-retry window would
+    /// otherwise leave a valid Keychain session signed-out until the process is
+    /// killed (Codex P2 on #313).
+    @ObservedObject private var reachability = ReachabilityMonitor.shared
     /// Same stored appearance ContentView applies (ContentView:115) —
     /// but SplashScreenView sits ABOVE ContentView in this ZStack,
     /// outside that modifier's subtree, so without applying it here
@@ -169,12 +174,24 @@ private struct RootView: View {
                         if AuthService.shared.isAuthenticated {
                             NotificationService.shared.startPolling()
                             Task { await AuthService.shared.refreshTokenIfNeeded() }
+                        } else {
+                            // Re-attempt restore on foreground so a valid cached
+                            // session that couldn't mint while offline recovers
+                            // without a process restart. No-op if genuinely
+                            // signed out (restoreSession returns fast).
+                            Task { await AuthService.shared.restoreSession() }
                         }
                     case .background:
                         NotificationService.shared.stopPolling()
                     default:
                         break
                     }
+                }
+                .onChange(of: reachability.isOnline) { wasOnline, isOnline in
+                    // Connectivity just returned → recover a valid session that
+                    // couldn't mint a token while the launch was offline.
+                    guard !wasOnline, isOnline, !AuthService.shared.isAuthenticated else { return }
+                    Task { await AuthService.shared.restoreSession() }
                 }
 
             if showSplash {

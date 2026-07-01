@@ -58,6 +58,12 @@ final class AuthService {
     /// who just signed out. Codex P2 on #313.
     private var restoreRetryTask: Task<Void, Never>?
 
+    /// Guards `restoreSession()` against concurrent runs from its several
+    /// triggers — launch `.task`, foreground re-entry, and connectivity-
+    /// restored. Touched only inside `MainActor.run`, so it stays race-free
+    /// without making the whole method MainActor-isolated.
+    private var isRestoreInFlight = false
+
     private init() {}
 
     // MARK: - Sign In (providers)
@@ -433,6 +439,16 @@ final class AuthService {
     /// active-session lagging `isLoaded` — must be ridden out, not torn down.
     /// Tearing valid sessions down here was the overnight-logout bug.
     func restoreSession() async {
+        // Reentrancy guard: launch, foreground, and connectivity-restored can
+        // all trigger a restore; only one should run at a time.
+        let acquired = await MainActor.run { () -> Bool in
+            if isRestoreInFlight { return false }
+            isRestoreInFlight = true
+            return true
+        }
+        guard acquired else { return }
+        defer { Task { @MainActor in self.isRestoreInFlight = false } }
+
         // Clerk.configure() returns synchronously but the SDK loads
         // client + environment in the background. getToken() is
         // unreliable until isLoaded == true.
