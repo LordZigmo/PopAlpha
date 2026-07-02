@@ -236,27 +236,28 @@ struct PaywallView: View {
             }
         }
         .task {
-            // Products are usually pre-loaded at App.task; trigger again
-            // on first paywall open in case the network was offline at
-            // launch.
+            // Products are usually pre-loaded at App.task; trigger again on first
+            // paywall open in case the network was offline at launch. The Retry
+            // banner also calls loadProducts() directly — both paths populate
+            // store.products, and the eligibility task below re-runs off that.
             if !store.productsLoaded {
                 await store.loadProducts()
             }
-            // Per-Apple-ID intro offer eligibility check. Returns false
-            // for users who already redeemed the trial (or who already
-            // have an active sub). Resolves for every loaded product
-            // that carries a subscription so the CTA reflects the
-            // currently-selected plan.
+        }
+        .task(id: store.products.count) {
+            // Resolve per-Apple-ID intro-offer eligibility, re-running whenever
+            // the product set changes — including a Retry that finally populates
+            // products after an initial failure. Without keying off the product
+            // count, a post-retry load left eligibility unresolved and pinned the
+            // trial CTA to .unknown for eligible users. Returns false for users
+            // who already redeemed the trial (or have an active sub).
+            guard !store.products.isEmpty else { return }
             for (productID, product) in store.products {
                 if let subscription = product.subscription {
                     eligibilityByProductID[productID] = await subscription.isEligibleForIntroOffer
                 }
             }
-            // Diagnostic: each product's intro-offer + eligibility
-            // state. If the simulator/device is rendering "Start Pro"
-            // for yearly when a trial IS configured, the log shows
-            // which leg of the state machine we landed on (offer
-            // missing from StoreKit response vs. eligibility false).
+            // Diagnostic: each product's intro-offer + eligibility state.
             for productID in PremiumProducts.allProductIDs {
                 let product = store.products[productID]
                 let hasOffer = product?.subscription?.introductoryOffer != nil
@@ -264,11 +265,11 @@ struct PaywallView: View {
                 Logger.api.info("[paywall] product=\(productID) loaded=\(product != nil) introOffer=\(hasOffer) eligible=\(eligible) state=\(String(describing: self.trialState(forProductID: productID)))")
             }
 
-            // Ground-truth trial telemetry for the trial-bearing (yearly)
-            // product, emitted once per presentation after StoreKit resolves.
-            // This is what tells us — across REAL users — whether the offer is
-            // even present (ASC config) vs users being ineligible. Previously
-            // this signal lived only in the device console.
+            // Ground-truth trial telemetry for the trial-bearing (yearly) product,
+            // emitted once StoreKit resolves (and again if a retry re-resolves) so
+            // the funnel reflects the FINAL state, not a transient empty one. Tells
+            // us — across REAL users — whether the offer is present (ASC config) vs
+            // users being ineligible. Previously this lived only in the console.
             let yearlyID = PremiumProducts.proYearly
             let yearlyProduct = store.products[yearlyID]
             var trialProps = paywallEventProps
