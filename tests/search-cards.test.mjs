@@ -323,4 +323,72 @@ export function runSearchCardsTests() {
   });
 
   assert.equal(tieBreakerResult[0]?.canonical_slug, "neo-1-energy-charge");
+
+  // Reprint regrouping (2026-07-01): ME: Ascended Heroes reprints
+  // Surging Sparks Pikachu ex with the SAME name and collector number.
+  // A bare-name query ties every printing on score, and the year-DESC
+  // tiebreak buried the 2024 original below every 2026 reprint (user
+  // report: pulled card missing from the 8-row iOS correction sheet).
+  // Same-name+number ties must group at the best member's rank with
+  // the original printing first.
+  const reprintRows = [
+    {
+      canonical_slug: "surging-sparks-57-pikachu-ex",
+      canonical_name: "Pikachu ex",
+      set_name: "Surging Sparks",
+      card_number: "57",
+      year: 2024,
+      primary_image_url: null,
+      search_doc_norm: "pikachu ex surging sparks 57 2024",
+    },
+    {
+      canonical_slug: "ascended-heroes-57-pikachu-ex",
+      canonical_name: "Pikachu ex",
+      set_name: "Ascended Heroes",
+      card_number: "57",
+      year: 2026,
+      primary_image_url: null,
+      search_doc_norm: "pikachu ex ascended heroes 57 2026",
+    },
+    {
+      canonical_slug: "ascended-heroes-277-pikachu-ex",
+      canonical_name: "Pikachu ex",
+      set_name: "Ascended Heroes",
+      card_number: "277",
+      year: 2026,
+      primary_image_url: null,
+      search_doc_norm: "pikachu ex ascended heroes 277 2026",
+    },
+  ];
+
+  const reprintGrouping = buildSearchCardResults({
+    canonicalRows: reprintRows,
+    aliasRows: [],
+    query: normalizeSearchInput("pikachu ex"),
+    limit: 20,
+  });
+
+  // Without regrouping this was [AH#277, AH#57, SS#57] (year DESC,
+  // then slug). The #57 pair collapses to the AH#57 slot, original
+  // (2024) printing first; the unshared #277 keeps its own rank.
+  assert.deepEqual(
+    reprintGrouping.map((row) => row.canonical_slug),
+    [
+      "ascended-heroes-277-pikachu-ex",
+      "surging-sparks-57-pikachu-ex",
+      "ascended-heroes-57-pikachu-ex",
+    ],
+  );
+
+  // Number-in-query path already preferred the older printing via
+  // preferOlderExactNumberedMatch — regrouping must not disturb it.
+  const reprintWithNumber = buildSearchCardResults({
+    canonicalRows: reprintRows,
+    aliasRows: [],
+    query: normalizeSearchInput("pikachu ex 57"),
+    limit: 20,
+  });
+
+  assert.equal(reprintWithNumber[0]?.canonical_slug, "surging-sparks-57-pikachu-ex");
+  assert.equal(reprintWithNumber[1]?.canonical_slug, "ascended-heroes-57-pikachu-ex");
 }
