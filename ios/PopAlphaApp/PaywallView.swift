@@ -163,30 +163,30 @@ struct PaywallView: View {
         PremiumProducts.proYearly,
     ]
 
-    private func isEligibleForTrial(productID: String) -> Bool {
-        // Optimistic default: treat as eligible until StoreKit reports.
-        // First-time users — by far the common case — ARE eligible, so
-        // showing trial copy during the brief loading window is the
-        // right call. After `.task` resolves we have the real value.
-        eligibilityByProductID[productID] ?? true
-    }
-
     private func trialState(forProductID productID: String) -> TrialState {
         if let product = store.products[productID] {
-            // Product loaded — trust the StoreKit response.
             if let intro = product.subscription?.introductoryOffer,
                intro.paymentMode == .freeTrial {
-                return isEligibleForTrial(productID: productID) ? .eligible : .noTrial
+                // Use the RESOLVED per-Apple-ID eligibility, never an optimistic
+                // default: a returning user who already redeemed the trial must
+                // NOT briefly see "free trial" / "no payment due now" before the
+                // async check lands (Apple would charge immediately). Hedge with
+                // .unknown until it resolves, then settle to .eligible/.noTrial.
+                switch eligibilityByProductID[productID] {
+                case .some(true):  return .eligible
+                case .some(false): return .noTrial
+                case .none:        return .unknown
+                }
             }
-            // No offer in the response. If we expect one (per the
-            // locally-known config), Apple is probably lagging — show
-            // the safer fallback rather than hide the trial entirely.
+            // Offer not in the StoreKit response but we expect one (per the
+            // locally-known config) — Apple is probably lagging; hedge rather
+            // than hide the trial entirely.
             return Self.productsWithKnownTrialConfig.contains(productID) ? .unknown : .noTrial
         }
-        // Products haven't loaded yet. Render trial copy optimistically
-        // for products we know carry one; covers the brief loading
-        // window so the CTA doesn't flash through "Start Pro" → trial.
-        return Self.productsWithKnownTrialConfig.contains(productID) ? .eligible : .noTrial
+        // Products haven't loaded yet (CTA is disabled meanwhile). Hedge for
+        // products we know carry a trial so the copy doesn't flash "Start Pro"
+        // before the offer resolves — but never affirm eligibility unresolved.
+        return Self.productsWithKnownTrialConfig.contains(productID) ? .unknown : .noTrial
     }
 
     /// Convenience for non-CTA call sites that just need to know
@@ -221,8 +221,8 @@ struct PaywallView: View {
                         planToggle
                         condensedBenefits
                     }
-                    purchaseActions
                     purchaseDisclosure
+                    purchaseActions
                     statusMessages
                     footerLinks
                 }
@@ -557,12 +557,15 @@ struct PaywallView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// "A daily report on 29,000+ cards" using the real tracked-card count,
-    /// floored to a clean thousand so it never overstates. Conservative
-    /// fallback before the count loads.
+    /// "A daily report on 22,000+ cards" using the real tracked-card count,
+    /// floored DOWN to a clean thousand so it can never overstate. Until the
+    /// count actually resolves (or if the fetch fails) it shows neutral copy —
+    /// no invented number — that's still true (we track tens of thousands).
     private var trackedReportLine: String {
-        let n = trackedCardCount ?? 29_000
-        let floored = max(1000, (n / 1000) * 1000)
+        guard let n = trackedCardCount, n >= 1000 else {
+            return "A daily report on thousands of cards"
+        }
+        let floored = (n / 1000) * 1000
         return "A daily report on \(floored.formatted(.number.grouping(.automatic)))+ cards"
     }
 
