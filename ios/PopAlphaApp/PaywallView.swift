@@ -98,6 +98,10 @@ struct PaywallView: View {
     // that carries a subscription.
     @State private var eligibilityByProductID: [String: Bool] = [:]
 
+    /// Real count of cards we track with live prices, for the feature line.
+    /// nil until fetched; the line falls back to a conservative floor.
+    @State private var trackedCardCount: Int?
+
     // MARK: - Sign-in gate
     //
     // Apple subscriptions must attach to a PopAlpha account: /api/iap/verify
@@ -200,26 +204,30 @@ struct PaywallView: View {
         ZStack {
             PA.Colors.background.ignoresSafeArea()
 
+            // Compact, savings-forward layout designed to fit one screen on a
+            // standard device (the ScrollView is a safety net for small
+            // devices / large Dynamic Type, not the primary interaction). The
+            // savings card is the hero: the discount does the selling.
             ScrollView {
-                VStack(spacing: 20) {
-                    closeButton
-                    hero
+                VStack(spacing: 14) {
+                    compactHeader
                     if showsCollectorTeaser {
                         collectorInsightTeaser
                     }
-                    benefits
                     if store.productsLoaded && store.products.isEmpty {
                         plansRetryBanner
                     } else {
-                        plans
+                        savingsHeroCard
+                        planToggle
+                        condensedBenefits
                     }
-                    purchaseDisclosure
                     purchaseActions
+                    purchaseDisclosure
                     statusMessages
                     footerLinks
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 4)
+                .padding(.top, 8)
                 .padding(.bottom, 20)
             }
 
@@ -255,9 +263,31 @@ struct PaywallView: View {
                 let eligible = eligibilityByProductID[productID] ?? false
                 Logger.api.info("[paywall] product=\(productID) loaded=\(product != nil) introOffer=\(hasOffer) eligible=\(eligible) state=\(String(describing: self.trialState(forProductID: productID)))")
             }
+
+            // Ground-truth trial telemetry for the trial-bearing (yearly)
+            // product, emitted once per presentation after StoreKit resolves.
+            // This is what tells us — across REAL users — whether the offer is
+            // even present (ASC config) vs users being ineligible. Previously
+            // this signal lived only in the device console.
+            let yearlyID = PremiumProducts.proYearly
+            let yearlyProduct = store.products[yearlyID]
+            var trialProps = paywallEventProps
+            trialProps["product_id"] = yearlyID
+            trialProps["products_loaded"] = store.productsLoaded
+            trialProps["intro_offer_present"] = (yearlyProduct?.subscription?.introductoryOffer != nil)
+            trialProps["eligible"] = eligibilityByProductID[yearlyID] ?? false
+            trialProps["state"] = String(describing: trialState(forProductID: yearlyID))
+            AnalyticsService.shared.capture(.paywallTrialState, properties: trialProps)
         }
         .task(id: personalization.canonicalSlug) {
             await loadTeaserInsight()
+        }
+        .task {
+            // Real tracked-card count for the feature line ("A daily report on
+            // N cards"). Falls back to a conservative floor if unavailable.
+            if trackedCardCount == nil {
+                trackedCardCount = (try? await CardService.shared.fetchHomepageSignalBoard())?.trackedCardsWithLivePrice
+            }
         }
         .onChange(of: gate.isPro) { _, isProNow in
             // Auto-dismiss the moment the user becomes pro — but NOT while the
@@ -324,56 +354,228 @@ struct PaywallView: View {
         ]
     }
 
-    // MARK: - Header
+    // MARK: - Compact header
 
-    private var closeButton: some View {
-        HStack {
-            Spacer()
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(PA.Colors.muted)
-                    .frame(width: 32, height: 32)
-                    .background(PA.Colors.surface)
-                    .clipShape(Circle())
+    /// Tight top bar: gold wordmark + close, then the (personalized) headline
+    /// on one or two lines. Replaces the tall crown-emblem hero so the pricing
+    /// clears the fold.
+    private var compactHeader: some View {
+        VStack(spacing: 10) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(PA.Colors.gold)
+                    Text("POPALPHA PRO")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(1.5)
+                        .foregroundStyle(PA.Colors.gold)
+                }
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(PA.Colors.muted)
+                        .frame(width: 30, height: 30)
+                        .background(PA.Colors.surface)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close")
+            Text(heroHeadline)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundStyle(PA.Colors.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var hero: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .fill(PA.Colors.gold.opacity(0.12))
-                    .frame(width: 60, height: 60)
-                Image(systemName: "crown.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(PA.Colors.gold.opacity(0.95))
+    // MARK: - Savings hero
+    //
+    // The paywall's centerpiece: the selected plan's price with the saving made
+    // loud. Yearly shows the struck 12×-monthly anchor, an exact "You save $X/yr"
+    // pill, the "Save N%" ribbon, and the per-week framing. Monthly instead
+    // nudges back to yearly. Every number is computed live from StoreKit prices,
+    // so nothing can drift from what Apple actually charges.
+
+    private var savingsHeroCard: some View {
+        let isYearly = selectedProductID == PremiumProducts.proYearly
+        let product = store.products[selectedProductID]
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(isYearly ? "YEARLY · BEST VALUE" : "MONTHLY")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.5)
+                    .foregroundStyle(isYearly ? PA.Colors.gold : PA.Colors.textSecondary)
+                Spacer()
+                if isYearly, let pct = yearlySavingsBadge {
+                    Text(pct.uppercased())
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(PA.Colors.gold)
+                        .clipShape(Capsule())
+                }
             }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(product?.displayPrice ?? "—")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundStyle(PA.Colors.text)
+                Text(isYearly ? "/yr" : "/mo")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(PA.Colors.textSecondary)
+                if isYearly, let strike = annualizedMonthlyStrike {
+                    Text(strike)
+                        .font(.system(size: 15, weight: .medium))
+                        .strikethrough(true, color: PA.Colors.muted)
+                        .foregroundStyle(PA.Colors.muted)
+                }
+            }
+            if isYearly {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        if let save = yearlySavingsAmount {
+                            Text("You save \(save)/yr")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(Color(red: 0.0, green: 0.20, blue: 0.09))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(PA.Colors.positive)
+                                .clipShape(Capsule())
+                        }
+                        if let perWeek = yearlyPerWeekPrice(product: product) {
+                            Text("that's \(perWeek)/week")
+                                .font(.system(size: 13))
+                                .foregroundStyle(PA.Colors.textSecondary)
+                        }
+                    }
+                    // Domain-anchored framing off the per-WEEK figure ($1.73),
+                    // which is unambiguously less than a booster pack. (The
+                    // per-month figure, ~$7.50, is not — so we don't claim it.)
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Less than a booster pack a week")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(PA.Colors.gold)
+                }
+            } else if let save = yearlySavingsAmount {
+                Button {
+                    selectedProductID = PremiumProducts.proYearly
+                    PAHaptics.tap()
+                } label: {
+                    Text("Switch to yearly and save \(save) →")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(PA.Colors.gold)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [PA.Colors.gold.opacity(0.16), PA.Colors.surface],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(PA.Colors.gold.opacity(0.55), lineWidth: 1)
+        )
+    }
 
-            Text("PopAlpha Pro")
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundStyle(PA.Colors.text)
+    /// Exact annual saving of yearly vs 12× monthly, in the product's currency
+    /// (e.g. "$65.89"). Computed live so it can never overstate the discount.
+    /// nil until both products load or if yearly isn't actually cheaper.
+    private var yearlySavingsAmount: String? {
+        guard let yearly = store.products[PremiumProducts.proYearly],
+              let monthly = store.products[PremiumProducts.proMonthly] else { return nil }
+        let saving = (monthly.price * Decimal(12)) - yearly.price
+        guard saving > 0 else { return nil }
+        return saving.formatted(yearly.priceFormatStyle)
+    }
 
-            // Prominent value prop — leads the paywall narrative.
-            Text(heroHeadline)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundStyle(PA.Colors.text)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 320)
+    // MARK: - Plan toggle
 
-            // Smaller supporting line under the value prop.
-            Text(heroSubheadline)
+    /// Compact two-up selector. The price detail lives in the savings hero, so
+    /// the chips carry just the label + a short qualifier.
+    private var planToggle: some View {
+        HStack(spacing: 8) {
+            planToggleChip(productID: PremiumProducts.proYearly, title: "Yearly")
+            planToggleChip(productID: PremiumProducts.proMonthly, title: "Monthly")
+        }
+    }
+
+    private func planToggleChip(productID: String, title: String) -> some View {
+        let isSelected = selectedProductID == productID
+        let qualifier: String = {
+            if showsTrialCopy(forProductID: productID) { return "7 days free" }
+            return productID == PremiumProducts.proYearly ? "billed yearly" : "billed monthly"
+        }()
+        let trialFlavored = showsTrialCopy(forProductID: productID)
+        return Button {
+            selectedProductID = productID
+            PAHaptics.tap()
+        } label: {
+            VStack(spacing: 3) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+                Text(qualifier)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(trialFlavored ? PA.Colors.positive : PA.Colors.textSecondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(isSelected ? PA.Colors.accentSoft : PA.Colors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(isSelected ? PA.Colors.accent : PA.Colors.border, lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Condensed benefits
+
+    /// Three tight one-liners — the value recap, shrunk so it doesn't push the
+    /// CTA below the fold. (The full four-row treatment lived in the previous
+    /// long layout.)
+    private var condensedBenefits: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            benefitLine(trackedReportLine)
+            benefitLine("Collector insights tuned to the cards you own")
+            benefitLine("Price alerts the moment it's worth acting")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "A daily report on 29,000+ cards" using the real tracked-card count,
+    /// floored to a clean thousand so it never overstates. Conservative
+    /// fallback before the count loads.
+    private var trackedReportLine: String {
+        let n = trackedCardCount ?? 29_000
+        let floored = max(1000, (n / 1000) * 1000)
+        return "A daily report on \(floored.formatted(.number.grouping(.automatic)))+ cards"
+    }
+
+    private func benefitLine(_ text: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 16))
+                .foregroundStyle(PA.Colors.accent)
+            Text(text)
                 .font(.system(size: 13))
-                .foregroundStyle(PA.Colors.textSecondary)
-                .multilineTextAlignment(.center)
+                .foregroundStyle(PA.Colors.text)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 320)
+            Spacer(minLength: 0)
         }
     }
 
@@ -404,32 +606,6 @@ struct PaywallView: View {
         case .trialExpiring: return "Your free trial ends soon."
         case .generic, .scanner, .collectorProfile:
             return "Don't overpay. Don't sell low."
-        }
-    }
-
-    /// Smaller supporting line. When personalized, it carries the ROI + the
-    /// mechanism; otherwise it's the per-context detail.
-    private var heroSubheadline: String {
-        // Collector-insight surface: lead with the free-scanning reassurance —
-        // it kills the "wait, are scans paywalled?" objection right at the
-        // decision — then the intelligence frame (not price/ROI).
-        if context == .collectorProfile, personalization.cardName != nil {
-            return "Scanning stays unlimited and free. Pro unlocks the intelligence behind every card."
-        }
-        if personalization.portfolioValue != nil || personalization.cardName != nil {
-            return "One better buy or sell pays for a year of Pro — with unlimited AI analysis, market signals, and price alerts."
-        }
-        switch context {
-        case .generic:
-            return "One better buy or sell pays for a year of Pro — unlimited AI analysis, signals, and alerts built around your collection."
-        case .scanner:
-            return "Scanning is free. Pro gives every card you scan unlimited AI analysis and alerts so you catch the next move."
-        case .collectorProfile:
-            return "See your collection style, radar chart, and AI insights tuned to the cards you own."
-        case .reengagement:
-            return "Pick up where you left off — your Pro features are one tap away."
-        case .trialExpiring:
-            return "Subscribe today to keep your collector profile, market signals, and price alerts."
         }
     }
 
@@ -623,93 +799,7 @@ struct PaywallView: View {
         .padding(.vertical, 16)
     }
 
-    private var benefits: some View {
-        // Reinforcement below the decision — what Pro unlocks, framed as
-        // understanding/identity (not data/price). Leads with the most
-        // differentiated value.
-        VStack(spacing: 8) {
-            benefitRow(
-                icon: "person.crop.square.filled.and.at.rectangle",
-                title: "Collector Insights",
-                subtitle: "Whether a card is you — how it fits your style, your gaps, and your next move."
-            )
-            benefitRow(
-                icon: "sparkles",
-                title: "AI Market Briefs",
-                subtitle: "Why a card's moving, in plain English — the story behind the number."
-            )
-            benefitRow(
-                icon: "chart.line.uptrend.xyaxis",
-                title: "Collection Signals",
-                subtitle: "What's quietly gaining steam across the sets you actually collect."
-            )
-            benefitRow(
-                icon: "bell.badge",
-                title: "Opportunity Alerts",
-                subtitle: "A nudge the moment a card you're watching hits one worth acting on."
-            )
-        }
-    }
-
-    private func benefitRow(icon: String, title: String, subtitle: String) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(PA.Colors.accentSoft)
-                    .frame(width: 40, height: 40)
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(PA.Colors.text)
-                Text(subtitle)
-                    .font(.system(size: 13))
-                    .foregroundStyle(PA.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(PA.Colors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(PA.Colors.border, lineWidth: 1)
-        )
-    }
-
-    // MARK: - Plan selector
-
-    private var plans: some View {
-        VStack(spacing: 10) {
-            planRow(
-                productID: PremiumProducts.proYearly,
-                badge: planBadge(for: PremiumProducts.proYearly),
-            )
-            planRow(
-                productID: PremiumProducts.proMonthly,
-                badge: planBadge(for: PremiumProducts.proMonthly),
-            )
-        }
-    }
-
-    /// Plan-row badge. Trial states (eligible OR unknown) show
-    /// "7 days free" so the row visually signals a trial exists even
-    /// when StoreKit is mid-load. .noTrial yearly falls back to the
-    /// savings badge; .noTrial monthly has no badge.
-    private func planBadge(for productID: String) -> String? {
-        if showsTrialCopy(forProductID: productID) {
-            return "7 days free"
-        }
-        if productID == PremiumProducts.proYearly {
-            return yearlySavingsBadge
-        }
-        return nil
-    }
+    // MARK: - Plan pricing helpers
 
     /// Real savings of yearly vs 12× monthly, computed from live StoreKit prices
     /// so the badge can't drift from actual pricing (a misleading-price App
@@ -726,94 +816,14 @@ struct PaywallView: View {
         return pct >= 1 ? "Save \(pct)%" : nil
     }
 
-    private func planRow(productID: String, badge: String?) -> some View {
-        let product = store.products[productID]
-        let isSelected = selectedProductID == productID
-        return Button {
-            selectedProductID = productID
-            PAHaptics.tap()
-        } label: {
-            HStack(alignment: .center, spacing: 12) {
-                ZStack {
-                    Circle()
-                        .strokeBorder(isSelected ? PA.Colors.accent : PA.Colors.border, lineWidth: 2)
-                        .frame(width: 22, height: 22)
-                    if isSelected {
-                        Circle()
-                            .fill(PA.Colors.accent)
-                            .frame(width: 12, height: 12)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(planTitle(productID: productID))
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(PA.Colors.text)
-                        if let badge {
-                            Text(badge)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(PA.Colors.gold)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(PA.Colors.gold.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                    }
-                    Text(planSubtitle(product: product, productID: productID))
-                        .font(.system(size: 12))
-                        .foregroundStyle(PA.Colors.textSecondary)
-                }
-                Spacer(minLength: 0)
-                Text(planPrice(product: product, productID: productID))
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(PA.Colors.text)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(isSelected ? PA.Colors.accentSoft : PA.Colors.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(isSelected ? PA.Colors.accent : PA.Colors.border, lineWidth: isSelected ? 2 : 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func planTitle(productID: String) -> String {
-        switch productID {
-        case PremiumProducts.proYearly:  return "Yearly"
-        case PremiumProducts.proMonthly: return "Monthly"
-        default: return "Pro"
-        }
-    }
-
-    private func planSubtitle(product: Product?, productID: String) -> String {
-        // Trial path takes priority — the free week is the lead message.
-        // Both .eligible and .unknown render the same subtitle so the
-        // value framing is consistent; the CTA + supporting line carry
-        // the eligibility nuance.
-        if showsTrialCopy(forProductID: productID) {
-            let priced = planPrice(product: product, productID: productID)
-            return "7 days free, then \(priced)"
-        }
-        // Yearly without trial: show monthly equivalent so the annual
-        // value is obvious at a glance.
-        if productID == PremiumProducts.proYearly,
-           let perMonth = yearlyPerMonthPrice(product: product) {
-            return "\(perMonth)/mo · billed yearly"
-        }
-        guard let product else {
-            return productID == PremiumProducts.proYearly ? "Billed yearly" : "Billed monthly"
-        }
-        let period = product.subscription?.subscriptionPeriod
-        switch period?.unit {
-        case .year:  return "Billed once a year"
-        case .month: return "Billed monthly"
-        case .week:  return "Billed weekly"
-        case .day:   return "Billed daily"
-        default:     return "Auto-renews until canceled"
-        }
+    /// 12× the monthly price, formatted in the product's currency, for the
+    /// struck-through "regular price" anchor on the yearly card. Computed
+    /// live so it can't drift from the actual monthly price. nil until both
+    /// products load.
+    private var annualizedMonthlyStrike: String? {
+        guard let monthly = store.products[PremiumProducts.proMonthly] else { return nil }
+        let annualized = monthly.price * Decimal(12)
+        return annualized.formatted(monthly.priceFormatStyle)
     }
 
     private func planPrice(product: Product?, productID: String) -> String {
@@ -827,13 +837,13 @@ struct PaywallView: View {
         return "\(product.displayPrice)\(suffix)"
     }
 
-    /// Yearly price ÷ 12, formatted in the product's currency. Used in
-    /// the yearly plan subtitle ("$7.50/mo · billed yearly"). Returns
-    /// nil when the product hasn't loaded yet.
-    private func yearlyPerMonthPrice(product: Product?) -> String? {
+    /// Yearly price ÷ 52, formatted in the product's currency. Used in the
+    /// yearly plan subtitle ("$1.73/wk · billed yearly") — the smallest
+    /// honest framing of the annual cost. Returns nil until the product loads.
+    private func yearlyPerWeekPrice(product: Product?) -> String? {
         guard let product else { return nil }
-        let perMonth = product.price / Decimal(12)
-        return perMonth.formatted(product.priceFormatStyle)
+        let perWeek = product.price / Decimal(52)
+        return perWeek.formatted(product.priceFormatStyle)
     }
 
     // MARK: - Disclosure + CTA
@@ -894,10 +904,26 @@ struct PaywallView: View {
     /// without scrolling — App Store users expect it near the action,
     /// and burying it in the footer reads as evasive.
     private var purchaseActions: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
+            // Risk-reversal reassurance directly above the CTA — only when
+            // the trial genuinely applies. The single highest-leverage
+            // Superwall micro-tweak for trial conversion.
+            if selectedTrialState == .eligible {
+                noPaymentDueBadge
+            }
             subscribeCTA
             restoreButton
         }
+    }
+
+    private var noPaymentDueBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.shield.fill")
+                .font(.system(size: 12, weight: .bold))
+            Text("No payment due now")
+                .font(.system(size: 13, weight: .semibold))
+        }
+        .foregroundStyle(PA.Colors.positive)
     }
 
     private var subscribeCTA: some View {
@@ -910,13 +936,20 @@ struct PaywallView: View {
                         .tint(.black)
                 } else {
                     Text(ctaText)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.black)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 50)
-            .background(PA.Colors.accent)
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .background(
+                LinearGradient(
+                    colors: [PA.Colors.accent, PA.Colors.accent.opacity(0.82)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(color: PA.Colors.accent.opacity(0.35), radius: 14, x: 0, y: 6)
         }
         .buttonStyle(.plain)
         .disabled(isPurchasing || store.products[selectedProductID] == nil)

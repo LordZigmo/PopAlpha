@@ -110,6 +110,18 @@ enum AnalyticsEvent: String {
     // server — the exact discrepancy that used to be swallowed silently.
     case subscriptionVerifyFailedClient = "subscription_verify_failed_client"
 
+    // Fires once per paywall presentation, AFTER StoreKit resolves the
+    // product's intro-offer + this Apple ID's eligibility. Makes the trial
+    // funnel observable in analytics (it was previously console-only):
+    //   • intro_offer_present=false  → App Store Connect isn't serving the
+    //     offer for this product (ASC config gap) — no real user can trial.
+    //   • intro_offer_present=true, eligible=false → user already redeemed
+    //     the trial (expected for reused test IDs; a real problem only if
+    //     brand-new users see it).
+    //   • state=eligible → the "Start free trial" CTA is actually shown.
+    // Carries product_id, intro_offer_present, eligible, state, surface.
+    case paywallTrialState = "paywall_trial_state"
+
     // Market Brief (3 free) vs Collector Insight (Pro-only) funnel.
     // paywall_from_collector_insight is captured via the paywall_viewed
     // `surface` property ("card_detail_insight_teaser").
