@@ -72,7 +72,7 @@ const SYSTEM_PROMPT = [
   "Do not say buy, sell, hold, investment, or being an AI.",
   'Return only JSON: {"summary_short":"...","summary_long":"..."}.',
   "summary_short: 2 sentences, 18-32 words. Lead with the current Market Price token {price} and its move; state the time window explicitly (e.g. 'over the past 7 days'), never the word 'recently'.",
-  "summary_long: 3 sentences, 30-55 words. Move, why it matters, what to watch.",
+  "summary_long: 3 sentences, 30-55 words. Move, why it matters, what to watch. Include the {price} token in the move sentence.",
   "- No prose, no code fences, no markdown outside the JSON.",
 ].join("\n");
 
@@ -211,11 +211,15 @@ function parseLlmProfile(raw: string): ParsedProfile | null {
   if (summaryShort.length > 500 || summaryLong.length > 1000) return null;
   if (summaryShort.length < 15) return null;
 
-  // Safety net for the {price}-token contract: the model must reference the
-  // current price only as {price} and emit no other dollar figures. If it
-  // leaked a literal "$N", reject → deterministic (tokenized) fallback instead
-  // of serving a baked price that would drift from the live hero.
+  // Safety net for the {price}-token contract. The model must reference the
+  // current price ONLY as the {price} token. Reject and fall back to the
+  // (tokenized) deterministic note if it either:
+  //   (a) leaked a literal "$N" — a baked price that would drift from the hero, or
+  //   (b) omitted the {price} token in either field — then the read-time replacer
+  //       has nothing to swap and the prose can drift again.
+  // The deterministic fallback always carries {price} in both fields.
   if (/\$\s*\d/.test(summaryShort) || /\$\s*\d/.test(summaryLong)) return null;
+  if (!summaryShort.includes(MARKET_PRICE_TOKEN) || !summaryLong.includes(MARKET_PRICE_TOKEN)) return null;
 
   return {
     summary_short: summaryShort,
