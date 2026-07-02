@@ -1,7 +1,11 @@
 import "server-only";
 
 import { dbAdmin } from "@/lib/db/admin";
-import { isLowDollarProfile, lowDollarProfileContent } from "@/lib/ai/card-profile-fallback";
+import {
+  fillPriceToken,
+  isLowDollarProfile,
+  lowDollarProfileContent,
+} from "@/lib/ai/card-profile-fallback";
 
 export type CardProfileSummary = {
   summary_short: string;
@@ -30,16 +34,24 @@ export async function loadCardProfileSummary(slug: string): Promise<CardProfileS
   }
   if (!data) return null;
 
+  const currentPrice = await loadCurrentMarketPrice(supabase, slug);
+
   // Same read-time low-dollar neutralizer as loadCardProfileDetail — the
   // server-rendered web /c/[slug] Pro card page reads the summary through THIS
   // function, so it needs the override too or it keeps serving stale penny
   // prose for already-poisoned rows.
-  if (isLowDollarProfile(await loadCurrentMarketPrice(supabase, slug))) {
+  if (isLowDollarProfile(currentPrice)) {
     const c = lowDollarProfileContent();
     return { ...data, summary_short: c.summaryShort, summary_long: c.summaryLong };
   }
 
-  return data;
+  // Fill the {price} sentinel with the live Market Price so the summary always
+  // matches the hero — the number is never baked into the cached prose.
+  return {
+    ...data,
+    summary_short: fillPriceToken(data.summary_short, currentPrice) ?? data.summary_short,
+    summary_long: fillPriceToken(data.summary_long, currentPrice),
+  };
 }
 
 /**
@@ -94,5 +106,11 @@ export async function loadCardProfileDetail(slug: string): Promise<CardProfileDe
     };
   }
 
-  return data;
+  // Fill the {price} sentinel with the live Market Price so the summary always
+  // matches the hero — the number is never baked into the cached prose.
+  return {
+    ...data,
+    summary_short: fillPriceToken(data.summary_short, currentPrice) ?? data.summary_short,
+    summary_long: fillPriceToken(data.summary_long, currentPrice),
+  };
 }

@@ -113,7 +113,10 @@ export async function runCardProfileFallbackTests() {
     );
     assert.equal(result.source, "fallback");
     assert.match(result.summaryLong, /finishing the Stellar Crown set/);
-    assert.match(result.summaryLong, /\$2\.50/);
+    // Market Price is now the {price} sentinel (filled with the live price at
+    // read time), not a baked figure.
+    assert.match(result.summaryLong, /\{price\}/);
+    assert.doesNotMatch(result.summaryLong, /\$2\.50/);
   }
 
   // ── Vintage cheap narrative ───────────────────────────────────────────────
@@ -155,7 +158,7 @@ export async function runCardProfileFallbackTests() {
     );
     assert.equal(result.source, "fallback");
     // Mid/premium STEADY card: original pattern starts with "<name> is holding steady".
-    assert.match(result.summaryLong, /Charizard is holding steady around \$120/);
+    assert.match(result.summaryLong, /Charizard is holding steady around \{price\}/);
     assert.match(result.summaryLong, /no clear move in either direction/);
   }
 
@@ -172,7 +175,9 @@ export async function runCardProfileFallbackTests() {
         year: 2025,
       }),
     );
-    assert.match(result.summaryLong, /Market Price is around \$1,419/);
+    // Current Market Price is tokenized; the unconfirmed SIGNAL price stays a
+    // real figure (it's context, not the hero's current price).
+    assert.match(result.summaryLong, /Market Price is around \{price\}/);
     assert.match(result.summaryLong, /recent market signals are higher near \$1,751/);
   }
 
@@ -213,7 +218,7 @@ export async function runCardProfileFallbackTests() {
     );
     assert.equal(result.source, "fallback");
     // $5 with null rarity, null year → mid_premium → existing 3-step
-    assert.match(result.summaryLong, /Mystery Card is holding steady around \$5/);
+    assert.match(result.summaryLong, /Mystery Card is holding steady around \{price\}/);
     // shouldn't crash on null rarity / year
     assert.equal(typeof result.summaryShort, "string");
     assert.ok(result.summaryShort.length > 0);

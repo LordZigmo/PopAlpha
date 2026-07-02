@@ -221,8 +221,47 @@ function round0(v: number | null): string {
   return v != null && Number.isFinite(v) ? Math.round(v).toString() : "";
 }
 
+// Sentinel emitted by BOTH summary generators (LLM + deterministic fallback) in
+// place of the CURRENT Market Price. The read-time layer (lib/card-profiles.ts,
+// loadCardProfileSummary/Detail) fills it with the live displayed price, so a
+// cached summary can never drift from the card-detail hero — which was the
+// recurring hero-vs-summary price mismatch (e.g. hero $4.33 / summary $4.64
+// after a re-stamp or sub-dollar drift within the hash bucket).
+export const MARKET_PRICE_TOKEN = "{price}";
+
+// Format the live Market Price the way the card-detail hero leads with it
+// (currency; cents under $1000).
+export function formatMarketPrice(price: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: price >= 1000 ? 0 : 2,
+  }).format(price);
+}
+
+// Fill the {price} sentinel with the LIVE Market Price. MUST be applied by
+// EVERY consumer of a generated summary — the card-profile API/page loaders AND
+// the personalization / Collector Insight path — so no surface ever shows or
+// feeds an LLM the raw token. Degrades to a neutral phrase when there's no
+// current price.
+export function fillPriceToken(
+  text: string | null,
+  price: number | null | undefined,
+): string | null {
+  if (text == null || !text.includes(MARKET_PRICE_TOKEN)) return text;
+  const label =
+    price != null && Number.isFinite(price) ? formatMarketPrice(price) : "the current price";
+  return text.split(MARKET_PRICE_TOKEN).join(label);
+}
+
+// Bump when the summary FORMAT changes (independent of the metrics values) so
+// the cron regenerates existing profiles into the new format. v2 = Market Price
+// tokenized ({price}) rather than a baked dollar figure.
+const PROFILE_FORMAT_VERSION = "v2-price-token";
+
 export function buildMetricsHash(input: CardProfileInput): string {
   const payload = [
+    PROFILE_FORMAT_VERSION,
     round0(input.marketPrice),
     round0(input.median7d),
     round0(input.changePct7d),
@@ -317,7 +356,7 @@ function formatMarketSignalSentence(input: CardProfileInput): string | null {
   const direction = input.recentMarketSignalDirection;
   if (direction !== "HIGHER" && direction !== "LOWER") return null;
   const directionText = direction === "HIGHER" ? "higher" : "lower";
-  return `${input.canonicalName}'s Market Price is around ${formatUsd(input.marketPrice)}, while recent market signals are ${directionText} near ${formatUsd(signalPrice)}.`;
+  return `${input.canonicalName}'s Market Price is around ${MARKET_PRICE_TOKEN}, while recent market signals are ${directionText} near ${formatUsd(signalPrice)}.`;
 }
 
 // ── Fallback tier classification ────────────────────────────────────────────
@@ -409,7 +448,7 @@ type Narrative = { happening: string; matters: string; watch: string };
 // expensive enough to deserve the move framing, and they should rarely
 // land here at all.
 function buildMidPremiumNarrative(input: CardProfileInput, signal: SignalLabel): Narrative {
-  const priceText = formatUsd(input.marketPrice);
+  const priceText = MARKET_PRICE_TOKEN;
   const changeText = formatSignedPct(input.changePct7d);
   const marketSignalSentence = formatMarketSignalSentence(input);
 
@@ -465,7 +504,7 @@ function buildMidPremiumNarrative(input: CardProfileInput, signal: SignalLabel):
 }
 
 function buildBulkNarrative(input: CardProfileInput): Narrative {
-  const priceText = formatUsd(input.marketPrice);
+  const priceText = MARKET_PRICE_TOKEN;
   const setText = input.setName ? ` from ${input.setName}` : "";
   const rarityWord = input.rarity ? input.rarity.toLowerCase() : "card";
   const happening = `Bulk-tier ${rarityWord}${setText}.`;
@@ -475,7 +514,7 @@ function buildBulkNarrative(input: CardProfileInput): Narrative {
 }
 
 function buildSetCompletionNarrative(input: CardProfileInput): Narrative {
-  const priceText = formatUsd(input.marketPrice);
+  const priceText = MARKET_PRICE_TOKEN;
   const setName = input.setName;
   const happening = setName
     ? `Affordable card from ${setName}.`
@@ -488,7 +527,7 @@ function buildSetCompletionNarrative(input: CardProfileInput): Narrative {
 }
 
 function buildVintageCheapNarrative(input: CardProfileInput): Narrative {
-  const priceText = formatUsd(input.marketPrice);
+  const priceText = MARKET_PRICE_TOKEN;
   const setText = input.setName ? ` from ${input.setName}` : "";
   const yearText = input.year != null ? `${input.year}` : "older";
   const happening = `${yearText} card${setText}.`;
@@ -498,7 +537,7 @@ function buildVintageCheapNarrative(input: CardProfileInput): Narrative {
 }
 
 function buildDigitalNarrative(input: CardProfileInput): Narrative {
-  const priceText = formatUsd(input.marketPrice);
+  const priceText = MARKET_PRICE_TOKEN;
   const setText = input.setName ? ` from ${input.setName}` : "";
   const happening = `Digital card${setText} (no physical print).`;
   const matters = `Tracked at around ${priceText}.`;
