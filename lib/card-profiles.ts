@@ -2,32 +2,10 @@ import "server-only";
 
 import { dbAdmin } from "@/lib/db/admin";
 import {
+  fillPriceToken,
   isLowDollarProfile,
   lowDollarProfileContent,
-  MARKET_PRICE_TOKEN,
 } from "@/lib/ai/card-profile-fallback";
-
-// Format the live Market Price the way the card-detail hero leads with it
-// (currency; cents under $1000). Local + simple so it mirrors the generators'
-// formatUsd.
-function formatMarketPrice(price: number): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: price >= 1000 ? 0 : 2,
-  }).format(price);
-}
-
-// Fill the {price} sentinel that the summary generators emit with the LIVE
-// displayed Market Price, so a cached summary can never drift from the hero
-// (the recurring hero-vs-summary mismatch). Degrades to a neutral phrase if
-// there's no current price rather than leaking the raw token.
-function fillPriceToken(text: string | null, price: number | null): string | null {
-  if (text == null || !text.includes(MARKET_PRICE_TOKEN)) return text;
-  const label =
-    price != null && Number.isFinite(price) ? formatMarketPrice(price) : "the current price";
-  return text.split(MARKET_PRICE_TOKEN).join(label);
-}
 
 export type CardProfileSummary = {
   summary_short: string;

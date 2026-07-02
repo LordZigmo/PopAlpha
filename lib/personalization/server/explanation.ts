@@ -9,6 +9,7 @@ import {
   generateCardProfile,
   type CardProfileInput,
 } from "@/lib/ai/card-profile-summary";
+import { fillPriceToken } from "@/lib/ai/card-profile-fallback";
 
 import { PROFILE_VERSION } from "../constants";
 import { getPersonalizationCapability } from "../capability";
@@ -150,7 +151,10 @@ async function readMarketSignal(
       signalLabel: profileRow?.signal_label ?? null,
       verdict: profileRow?.verdict ?? null,
       chip: profileRow?.chip ?? null,
-      summaryShort: profileRow?.summary_short ?? null,
+      // Fill the {price} sentinel with the live Market Price before this summary
+      // feeds the Collector Insight prompt — otherwise the LLM sees/echoes the
+      // raw token (the API/page loaders fill it, but this path bypasses them).
+      summaryShort: fillPriceToken(profileRow?.summary_short ?? null, metricsRow?.market_price ?? null),
       marketPrice: metricsRow?.market_price ?? null,
       changePct7d: metricsRow?.change_pct_7d ?? null,
       // DB column is named active_listings_7d for historical reasons;
@@ -281,7 +285,9 @@ async function ensureMarketSignal(
       signalLabel: result.signalLabel,
       verdict: result.verdict,
       chip: result.chip,
-      summaryShort: result.summaryShort,
+      // Fill the token for immediate use (the DB upsert above keeps it as the
+      // {price} sentinel so future read-time fills stay live).
+      summaryShort: fillPriceToken(result.summaryShort, profileInput.marketPrice),
       marketPrice: profileInput.marketPrice,
       changePct7d: profileInput.changePct7d,
       priceObservations7d: profileInput.priceObservations7d,

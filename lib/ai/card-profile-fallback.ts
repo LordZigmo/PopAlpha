@@ -229,6 +229,31 @@ function round0(v: number | null): string {
 // after a re-stamp or sub-dollar drift within the hash bucket).
 export const MARKET_PRICE_TOKEN = "{price}";
 
+// Format the live Market Price the way the card-detail hero leads with it
+// (currency; cents under $1000).
+export function formatMarketPrice(price: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: price >= 1000 ? 0 : 2,
+  }).format(price);
+}
+
+// Fill the {price} sentinel with the LIVE Market Price. MUST be applied by
+// EVERY consumer of a generated summary — the card-profile API/page loaders AND
+// the personalization / Collector Insight path — so no surface ever shows or
+// feeds an LLM the raw token. Degrades to a neutral phrase when there's no
+// current price.
+export function fillPriceToken(
+  text: string | null,
+  price: number | null | undefined,
+): string | null {
+  if (text == null || !text.includes(MARKET_PRICE_TOKEN)) return text;
+  const label =
+    price != null && Number.isFinite(price) ? formatMarketPrice(price) : "the current price";
+  return text.split(MARKET_PRICE_TOKEN).join(label);
+}
+
 // Bump when the summary FORMAT changes (independent of the metrics values) so
 // the cron regenerates existing profiles into the new format. v2 = Market Price
 // tokenized ({price}) rather than a baked dollar figure.
