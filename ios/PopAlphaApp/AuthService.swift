@@ -51,6 +51,28 @@ final class AuthService {
 
     private var tokenRefreshTask: Task<Void, Never>?
 
+    /// Background session-recovery task spawned by the transient cold-launch
+    /// mint-failure path. Held so sign-out can cancel it — otherwise a slow or
+    /// offline sign-out (Clerk's signOut runs fire-and-forget) could let the
+    /// loop mint from the captured session and silently re-authenticate a user
+    /// who just signed out. Codex P2 on #313.
+    private var restoreRetryTask: Task<Void, Never>?
+
+    /// Guards `restoreSession()` against concurrent runs from its several
+    /// triggers — launch `.task`, foreground re-entry, and connectivity-
+    /// restored. Touched only inside `MainActor.run`, so it stays race-free
+    /// without making the whole method MainActor-isolated.
+    private var isRestoreInFlight = false
+
+    /// Set true by an explicit user sign-out, cleared by the next explicit
+    /// sign-in. Suppresses the foreground / connectivity auto-recovery so it
+    /// can never resurrect a session the user deliberately signed out of (the
+    /// local Clerk session can linger until its fire-and-forget — or offline —
+    /// signOut completes). The launch `.task` restore is intentionally NOT
+    /// gated by this: a fresh process with a genuinely cleared session finds
+    /// nothing to restore. Codex P1 on #313.
+    private var didSignOutThisRun = false
+
     private init() {}
 
     // MARK: - Sign In (providers)
@@ -169,6 +191,8 @@ final class AuthService {
         currentFirstName = firstName
         currentImageURL = imageUrl
         startTokenRefresh()
+        // A confirmed explicit sign-in re-enables auto-recovery for this run.
+        didSignOutThisRun = false
 
         // Attribute subsequent PostHog events to this Clerk user so
         // iOS activity lands on the same person as the user's web
@@ -389,6 +413,15 @@ final class AuthService {
             try? await Clerk.shared.auth.signOut()
         }
         stopTokenRefresh()
+        // Cancel any in-flight background session recovery so a transient
+        // cold-launch retry can't mint from the captured session and undo this
+        // sign-out (Codex P2 on #313).
+        restoreRetryTask?.cancel()
+        restoreRetryTask = nil
+        // Latch the explicit sign-out so foreground / connectivity auto-recovery
+        // can't re-authenticate before Clerk's (fire-and-forget, possibly
+        // offline) signOut fully clears the session. Cleared on next sign-in.
+        didSignOutThisRun = true
         isAuthenticated = false
         authToken = nil
         currentUserId = nil
@@ -406,72 +439,203 @@ final class AuthService {
         AnalyticsService.shared.reset()
     }
 
+    /// Foreground / connectivity-restored entry point for cold-launch recovery.
+    /// Unlike the launch `.task`, this must NOT run after an explicit sign-out
+    /// (it would re-authenticate a user who just signed out) or while a sign-in
+    /// is already in progress. No-op in those cases; otherwise defers to
+    /// `restoreSession()` (which is itself reentrancy-guarded).
+    @MainActor
+    func recoverSessionIfNeeded() async {
+        guard !isAuthenticated, !isSigningIn, !didSignOutThisRun else { return }
+        await restoreSession()
+    }
+
     // MARK: - Session Restoration (cold launch)
 
     /// Called once on app launch via `.task` in PopAlphaApp.
     /// If Clerk has a cached session, restore auth state without
     /// re-presenting the OAuth flow.
+    ///
+    /// Guiding principle (hard-won): a cached Clerk session in the Keychain
+    /// is durable and valuable — NEVER destroy it on a *transient* or *racy*
+    /// failure. The only failure that justifies teardown is the genuine
+    /// orphan-credential limbo (client holds session(s) but no active
+    /// `session` resolves), where a fresh signIn would otherwise 400 with
+    /// `session_exists`. Everything else — cold-launch network hiccups, the
+    /// active-session lagging `isLoaded` — must be ridden out, not torn down.
+    /// Tearing valid sessions down here was the overnight-logout bug.
     func restoreSession() async {
+        // Reentrancy guard: launch, foreground, and connectivity-restored can
+        // all trigger a restore; only one should run at a time.
+        let acquired = await MainActor.run { () -> Bool in
+            if isRestoreInFlight { return false }
+            isRestoreInFlight = true
+            return true
+        }
+        guard acquired else { return }
+        defer { Task { @MainActor in self.isRestoreInFlight = false } }
+
         // Clerk.configure() returns synchronously but the SDK loads
         // client + environment in the background. getToken() is
         // unreliable until isLoaded == true.
         await waitForClerkLoaded()
+
+        // The ACTIVE session can lag `isLoaded` by a beat — the SDK populates
+        // `client` first, then resolves `session`. Reading `session` too
+        // early returned nil for a perfectly valid session and dropped us
+        // into the teardown branch. Only wait when there's a credential that
+        // SHOULD resolve to a session, so a genuinely signed-out launch
+        // doesn't eat the timeout.
+        let preUser = await Clerk.shared.user
+        let preClientSessions = await Clerk.shared.client?.sessions ?? []
+        if preUser != nil || !preClientSessions.isEmpty {
+            await waitForActiveSession()
+        }
 
         let user = await Clerk.shared.user
         let session = await Clerk.shared.session
         let clientSessions = await Clerk.shared.client?.sessions ?? []
         Logger.auth.debug("restore: user=\(user?.id ?? "nil") session=\(session?.id ?? "nil") clientSessions=\(clientSessions.count)")
 
-        // Healthy path: user + active session + token mint succeeds.
-        if let user,
-           !user.id.isEmpty,
-           let session,
-           let token = try? await session.getToken(),
-           !token.isEmpty {
-            await applyHealthyRestore(user: user, token: token)
+        // Active session present → mint a token, retrying so a cold network
+        // at launch doesn't read as a dead session.
+        if let user, !user.id.isEmpty, let session {
+            if let token = await mintTokenWithRetry(session) {
+                await applyHealthyRestore(user: user, token: token)
+                return
+            }
+            // We HAVE an active session Clerk still considers valid, but
+            // couldn't mint a token right now — almost always a transient
+            // cold-launch network failure. Do NOT destroy the session (that
+            // was the bug). Keep it and recover in the background the moment
+            // connectivity returns — no re-login, no paywall.
+            Logger.auth.debug("restore: active session but token mint failed — keeping session, retrying in background")
+            retryRestoreInBackground(session: session, user: user)
             return
         }
 
-        // Unhealthy path. Either user is nil but the client still has an
-        // orphan credential (Clerk responds "session_exists" to signIn),
-        // user is non-nil but session is dead, or token mint fails.
-        // Either way, every signIn attempt will 400 and every API call
-        // will 401 until we explicitly tear down what's on the client.
-        if user != nil || !clientSessions.isEmpty {
-            Logger.auth.debug("restore: limbo — clearing client (sessions=\(clientSessions.count))")
-            do {
-                try await Clerk.shared.auth.signOut()
-                Logger.auth.debug("signOut(all) ok")
-            } catch {
-                Logger.auth.debug("signOut(all) failed: \(error)")
+        // Tear down orphan credential(s) ONLY when there is genuinely no active
+        // `session` to preserve. Guarding on `session == nil` (not merely on
+        // `user` being absent) is essential: if `session` resolved but `user`
+        // hasn't yet, the healthy branch above is skipped, and clearing here
+        // would sign out a VALID session — re-introducing the Keychain-deletion
+        // race for the `session != nil && user == nil` window (Codex P2 on
+        // #313). With no active session, leftover client credentials otherwise
+        // 400 every future signIn with `session_exists`, so teardown is correct
+        // and safe.
+        if session == nil, !clientSessions.isEmpty {
+            Logger.auth.debug("restore: orphan client sessions, no active session — clearing")
+            await clearOrphanClientSessions(clientSessions)
+        }
+    }
+
+    /// Poll for the active session AND its user to resolve after `isLoaded`.
+    /// The SDK can report `isLoaded == true` a beat before `Clerk.shared.session`
+    /// is populated, and can surface `session` a beat before `user`. The
+    /// healthy-restore branch needs BOTH; waiting only on `session` left a
+    /// `session != nil && user == nil` window that skipped the healthy branch
+    /// and fell into orphan teardown, deleting a valid Keychain session (the
+    /// overnight-logout bug; Codex P2 on #313). Bounded by the timeout so a
+    /// genuinely signed-out launch doesn't stall.
+    private func waitForActiveSession(timeout: Duration = .seconds(3)) async {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await Clerk.shared.session != nil, await Clerk.shared.user != nil { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    /// Mint a session JWT, retrying briefly so a cold network at launch
+    /// doesn't read as a dead session. Returns nil only after exhausting
+    /// retries — callers MUST treat nil as "try again later," never as
+    /// "session invalid." Never destroys anything.
+    private func mintTokenWithRetry(_ session: Session, attempts: Int = 3) async -> String? {
+        for i in 0..<attempts {
+            if let token = try? await session.getToken(), !token.isEmpty {
+                return token
             }
-            for s in clientSessions {
-                do {
-                    try await Clerk.shared.auth.signOut(sessionId: s.id)
-                    Logger.auth.debug("signOut(sessionId: \(s.id)) ok")
-                } catch {
-                    Logger.auth.debug("signOut(sessionId: \(s.id)) failed: \(error)")
-                }
+            if i < attempts - 1 {
+                try? await Task.sleep(for: .milliseconds(400 * (i + 1)))
             }
         }
-        return
+        return nil
+    }
+
+    /// Background recovery for the "valid session, transient mint failure"
+    /// case. Retries on a slow cadence so the user is restored seamlessly
+    /// once connectivity returns — no re-login. Bounded so a truly dead
+    /// session doesn't spin forever; the next cold launch retries fresh.
+    private func retryRestoreInBackground(session: Session, user: User) {
+        restoreRetryTask?.cancel()
+        restoreRetryTask = Task { [weak self] in
+            guard let self else { return }
+            for delay in [2, 4, 8, 15, 30] {
+                try? await Task.sleep(for: .seconds(delay))
+                if Task.isCancelled { return }
+                // Another path (e.g. a manual sign-in) may have won.
+                let alreadyAuthed = await MainActor.run { self.isAuthenticated }
+                if alreadyAuthed { return }
+                if let token = try? await session.getToken(), !token.isEmpty {
+                    // respectCancellation: the commit + cancellation check happen
+                    // in the same MainActor turn as signOut(), so a sign-out that
+                    // fired while we were minting wins — we never re-authenticate
+                    // a user who just signed out.
+                    if await self.applyHealthyRestore(user: user, token: token, respectCancellation: true) {
+                        Logger.auth.debug("restore: background retry succeeded — session recovered without re-login")
+                    }
+                    return
+                }
+            }
+            Logger.auth.debug("restore: background retry exhausted — will retry next launch")
+        }
+    }
+
+    /// Tear down orphan client session(s) that block a fresh sign-in
+    /// (`session_exists`). Shared by the cold-launch limbo path and the 401
+    /// recovery path. Only ever called when there is NO active session worth
+    /// preserving.
+    private func clearOrphanClientSessions(_ sessions: [Session]) async {
+        do {
+            try await Clerk.shared.auth.signOut()
+            Logger.auth.debug("signOut(all) ok")
+        } catch {
+            Logger.auth.debug("signOut(all) failed: \(error)")
+        }
+        for s in sessions {
+            do {
+                try await Clerk.shared.auth.signOut(sessionId: s.id)
+                Logger.auth.debug("signOut(sessionId: \(s.id)) ok")
+            } catch {
+                Logger.auth.debug("signOut(sessionId: \(s.id)) failed: \(error)")
+            }
+        }
     }
 
     /// Apply a successful cold-launch restore to local state and kick
     /// off the side-effects (handle fetch, push registration, analytics).
     /// Pulled out of `restoreSession` so the healthy path stays linear.
-    private func applyHealthyRestore(user: User, token: String) async {
+    ///
+    /// `respectCancellation` is set by the background-retry caller: the commit
+    /// (setSession) and the cancellation check run in the same MainActor turn
+    /// as `signOut()`, so a sign-out that cancelled this task wins the race and
+    /// we skip the restore instead of resurrecting a signed-out session.
+    /// Returns whether the session was actually committed.
+    @discardableResult
+    private func applyHealthyRestore(user: User, token: String, respectCancellation: Bool = false) async -> Bool {
         let userId = user.id
         let firstName = user.firstName
         let email = user.primaryEmailAddress?.emailAddress
         let imageUrl = user.imageUrl
 
-        await MainActor.run {
+        let committed = await MainActor.run { () -> Bool in
+            if respectCancellation && Task.isCancelled { return false }
             setSession(token: token, userId: userId, handle: nil)
             currentFirstName = firstName
             currentImageURL = imageUrl
             startTokenRefresh()
+            return true
         }
+        guard committed else { return false }
 
         // Re-identify on cold launch so events from this session
         // attribute to the correct user. No signed-in event is fired
@@ -488,6 +652,7 @@ final class AuthService {
         // registration so the server gets a fresh device token every
         // cold launch. PushService dedupes if the token hasn't rotated.
         await PushService.shared.requestAuthorizationIfNeeded()
+        return true
     }
 
     // MARK: - Token Refresh
@@ -574,6 +739,8 @@ final class AuthService {
     /// thinks the user is still signed in even though our server doesn't.
     @MainActor
     func handleServerAuthRejection() async {
+        // Most 401s are just an expired JWT — mint a fresh one and let the
+        // caller retry with it.
         if let token = try? await Clerk.shared.auth.getToken(),
            !token.isEmpty,
            token != authToken {
@@ -582,29 +749,27 @@ final class AuthService {
             APIClient.setAuthToken(token)
             return
         }
-        Logger.auth.debug("401 → no usable token from Clerk, tearing down")
+
+        // Couldn't get a *new* token. If Clerk still has an active session,
+        // this is almost certainly transient (same token re-minted, a cold
+        // network, or a one-off server blip) — do NOT destroy the session.
+        // Logging the user out here was a second source of spurious sign-
+        // outs. Leave the session intact; the 50s refresh loop and the next
+        // request recover. The single failing request surfaces as
+        // unauthorized to its own caller.
+        if Clerk.shared.session != nil {
+            Logger.auth.debug("401 → active session present, treating as transient; session preserved")
+            return
+        }
+
+        // No active session AND no usable token → genuine invalid/orphan
+        // state. Now teardown is correct: it unblocks a fresh signIn that
+        // would otherwise 400 with `session_exists`.
+        Logger.auth.debug("401 → no active session and no token, tearing down")
         isAuthenticated = false
         authToken = nil
         APIClient.setAuthToken(nil)
-
-        // Same cleanup as the cold-launch limbo path. Without this, the
-        // user is stuck: local state says signed-out, Clerk says they're
-        // still signed in, signIn rejects with session_exists.
-        let sessions = Clerk.shared.client?.sessions ?? []
-        do {
-            try await Clerk.shared.auth.signOut()
-            Logger.auth.debug("401 cleanup: signOut(all) ok")
-        } catch {
-            Logger.auth.debug("401 cleanup: signOut(all) failed: \(error)")
-        }
-        for s in sessions {
-            do {
-                try await Clerk.shared.auth.signOut(sessionId: s.id)
-                Logger.auth.debug("401 cleanup: signOut(\(s.id)) ok")
-            } catch {
-                Logger.auth.debug("401 cleanup: signOut(\(s.id)) failed: \(error)")
-            }
-        }
+        await clearOrphanClientSessions(Clerk.shared.client?.sessions ?? [])
     }
 
     // MARK: - Profile Fetch
