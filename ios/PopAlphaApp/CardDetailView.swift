@@ -130,6 +130,12 @@ struct CardDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var premiumGate = PremiumGate.shared
     @State private var showCorrectionSheet = false
+    /// True after the user taps the check on the "Is this the right
+    /// card?" prompt. Collapses the prompt into a "Verified" pill for
+    /// the remainder of this detail visit; not persisted — the prompt
+    /// only exists on scan-navigations (scanImageHash != nil) and each
+    /// new scan is its own verification opportunity.
+    @State private var scanVerified = false
     @State private var showMarketSummaryPaywall = false
     /// Slugs for which we've already fired market_brief_viewed, so the analytics
     /// event fires once per card (re-fires on an in-place EN↔JP slug swap) but
@@ -893,40 +899,111 @@ struct CardDetailView: View {
     // MARK: - Hero (matches web canonical-card-floating-hero)
 
     /// Shown only when the user arrived at this detail view via a
-    /// scanner identify. Lets them flag "that's not the card I
-    /// scanned" and feed the correct slug back into the eval corpus,
-    /// where it becomes regression-test material + fine-tuning fodder.
+    /// scanner identify. Redesigned 2026-07-01 (owner request): the old
+    /// "Not this card? Tell the scanner what it actually was." banner
+    /// read as a warning on every scan. Now a neutral "Is this the
+    /// right card?" with an ✕ and a ✓:
+    ///   ✓ — verified scan. Submits a confirmation through the SAME
+    ///       correction pipeline with slug == the model's prediction;
+    ///       analytics already classify from==to submissions as
+    ///       confirmations, and the server anchors the real-world photo
+    ///       to the verified slug (training signal). Collapses the
+    ///       prompt into a "Verified" pill.
+    ///   ✕ — opens the existing correction sheet (search → submit),
+    ///       feeding the eval corpus exactly as before.
     private var correctionPrompt: some View {
-        Button {
-            PAHaptics.tap()
-            showCorrectionSheet = true
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "questionmark.circle.fill")
+        HStack(spacing: 10) {
+            if scanVerified {
+                Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(detailAccent)
-                Text("Not this card? Tell the scanner what it actually was.")
+                    .foregroundStyle(PA.Colors.positive)
+                Text("Verified — thanks!")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(PA.Colors.text)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(PA.Colors.muted)
+            } else {
+                Text("Is this the right card?")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(PA.Colors.text)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Button {
+                    PAHaptics.tap()
+                    showCorrectionSheet = true
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(PA.Colors.negative)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(PA.Colors.negative.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("No — correct this scan")
+                Button {
+                    PAHaptics.success()
+                    confirmScan()
+                } label: {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(PA.Colors.positive)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(PA.Colors.positive.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Yes — this is the right card")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(detailAccent.opacity(0.08))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(detailAccent.opacity(0.25), lineWidth: 1)
-                    )
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill((scanVerified ? PA.Colors.positive : detailAccent).opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke((scanVerified ? PA.Colors.positive : detailAccent).opacity(0.25), lineWidth: 1)
+                )
+        )
+        .animation(.easeInOut(duration: 0.2), value: scanVerified)
+    }
+
+    /// ✓ on the scan-verify prompt. Fires the confirmation through
+    /// ScanCorrectionCoordinator with slug == `card.id` (the immutable
+    /// navigation input — the model's prediction, NOT activeCard, so an
+    /// EN↔JP toggle mid-visit can't verify the paired slug). from==to in
+    /// the predicted metadata is what marks it a CONFIRMATION downstream.
+    ///
+    /// Guests: deliberately NO sign-in interception (unlike ✕→correction,
+    /// which queues + presents sign-in per #294). A correction carries
+    /// high intent — the user is actively fixing an error — so an auth
+    /// gate is proportionate. A ✓ is a one-tap courtesy; interrupting it
+    /// with a sign-in sheet punishes the exact behavior we want more of.
+    /// Guest taps mark the pill verified locally and skip the server
+    /// write (the anchor pipeline stays accountable / non-anonymous).
+    private func confirmScan() {
+        scanVerified = true
+        guard AuthService.shared.isAuthenticated, let bytes = scanImage else { return }
+        ScanCorrectionCoordinator.shared.submit(
+            image: bytes,
+            slug: card.id,
+            language: card.id.hasSuffix("-jp") ? .jp : .en,
+            notes: "detail-verify-confirm",
+            predicted: scanCorrectionMetadata,
+            surface: "detail_confirm",
+        )
+        #if DEBUG
+        // Confirmed scans are ground truth — land them in the eval
+        // corpus like picker picks do (distinct notes tag so corpus
+        // queries can split confirmations from corrections).
+        if let hash = scanImageHash {
+            ScanDebugCapture.autoPromoteToEval(
+                imageHash: hash,
+                canonicalSlug: card.id,
+                capturedSource: .userCorrection,
+                notesTag: "auto_detail_confirm",
+                scanImage: scanImage,
             )
         }
-        .buttonStyle(.plain)
+        #endif
     }
 
     private var heroSection: some View {
