@@ -1,7 +1,33 @@
 import "server-only";
 
 import { dbAdmin } from "@/lib/db/admin";
-import { isLowDollarProfile, lowDollarProfileContent } from "@/lib/ai/card-profile-fallback";
+import {
+  isLowDollarProfile,
+  lowDollarProfileContent,
+  MARKET_PRICE_TOKEN,
+} from "@/lib/ai/card-profile-fallback";
+
+// Format the live Market Price the way the card-detail hero leads with it
+// (currency; cents under $1000). Local + simple so it mirrors the generators'
+// formatUsd.
+function formatMarketPrice(price: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: price >= 1000 ? 0 : 2,
+  }).format(price);
+}
+
+// Fill the {price} sentinel that the summary generators emit with the LIVE
+// displayed Market Price, so a cached summary can never drift from the hero
+// (the recurring hero-vs-summary mismatch). Degrades to a neutral phrase if
+// there's no current price rather than leaking the raw token.
+function fillPriceToken(text: string | null, price: number | null): string | null {
+  if (text == null || !text.includes(MARKET_PRICE_TOKEN)) return text;
+  const label =
+    price != null && Number.isFinite(price) ? formatMarketPrice(price) : "the current price";
+  return text.split(MARKET_PRICE_TOKEN).join(label);
+}
 
 export type CardProfileSummary = {
   summary_short: string;
@@ -30,16 +56,24 @@ export async function loadCardProfileSummary(slug: string): Promise<CardProfileS
   }
   if (!data) return null;
 
+  const currentPrice = await loadCurrentMarketPrice(supabase, slug);
+
   // Same read-time low-dollar neutralizer as loadCardProfileDetail — the
   // server-rendered web /c/[slug] Pro card page reads the summary through THIS
   // function, so it needs the override too or it keeps serving stale penny
   // prose for already-poisoned rows.
-  if (isLowDollarProfile(await loadCurrentMarketPrice(supabase, slug))) {
+  if (isLowDollarProfile(currentPrice)) {
     const c = lowDollarProfileContent();
     return { ...data, summary_short: c.summaryShort, summary_long: c.summaryLong };
   }
 
-  return data;
+  // Fill the {price} sentinel with the live Market Price so the summary always
+  // matches the hero — the number is never baked into the cached prose.
+  return {
+    ...data,
+    summary_short: fillPriceToken(data.summary_short, currentPrice) ?? data.summary_short,
+    summary_long: fillPriceToken(data.summary_long, currentPrice),
+  };
 }
 
 /**
@@ -94,5 +128,11 @@ export async function loadCardProfileDetail(slug: string): Promise<CardProfileDe
     };
   }
 
-  return data;
+  // Fill the {price} sentinel with the live Market Price so the summary always
+  // matches the hero — the number is never baked into the cached prose.
+  return {
+    ...data,
+    summary_short: fillPriceToken(data.summary_short, currentPrice) ?? data.summary_short,
+    summary_long: fillPriceToken(data.summary_long, currentPrice),
+  };
 }

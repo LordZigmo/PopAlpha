@@ -14,6 +14,7 @@ import {
   buildMetricsHash,
   isLowDollarProfile,
   CARD_PROFILE_MODEL_LABEL,
+  MARKET_PRICE_TOKEN,
   priceTrackingBucket,
   SIGNAL_LABELS,
   VERDICTS,
@@ -65,11 +66,12 @@ const SYSTEM_PROMPT = [
   "You write PopAlpha card notes for Pokemon TCG collectors.",
   "Use only the supplied facts. Do not invent prices, listings, supply, or advice.",
   "Market Price is the only current price. Never state a median, 30-day high, most recent single sale, or signal figure as the current or 'new' price.",
+  "Write the current Market Price ONLY as the literal token {price} (curly braces, no dollar sign) — a later step swaps in the live price. Never write ANY dollar amount ($); describe other levels (medians, an unconfirmed signal) qualitatively (e.g. 'above the recent median'), never with a $ figure.",
   "If a recent signal sits above or below Market Price, call it an unconfirmed signal — do not present it as the price.",
   "Plain English, short sentences, smart friend tone. No jargon, hype, or slang.",
   "Do not say buy, sell, hold, investment, or being an AI.",
   'Return only JSON: {"summary_short":"...","summary_long":"..."}.',
-  "summary_short: 2 sentences, 18-32 words. Lead with the current Market Price and its move; state the time window explicitly (e.g. 'over the past 7 days'), never the word 'recently'.",
+  "summary_short: 2 sentences, 18-32 words. Lead with the current Market Price token {price} and its move; state the time window explicitly (e.g. 'over the past 7 days'), never the word 'recently'.",
   "summary_long: 3 sentences, 30-55 words. Move, why it matters, what to watch.",
   "- No prose, no code fences, no markdown outside the JSON.",
 ].join("\n");
@@ -115,7 +117,9 @@ function buildUserPrompt(
   lines.push(`Fixed signal: ${baseline.signalLabel}; verdict: ${baseline.verdict}`);
 
   const priceFacts = [
-    formatUsd(input.marketPrice) ? `Current Market Price (the only current price) ${formatUsd(input.marketPrice)}` : null,
+    input.marketPrice != null && Number.isFinite(input.marketPrice)
+      ? `Current Market Price (the only current price): ${MARKET_PRICE_TOKEN} — write it exactly as this token, never a dollar amount`
+      : null,
     formatUsd(input.recentMarketSignalUsd ?? null) && (input.recentMarketSignalDirection === "HIGHER" || input.recentMarketSignalDirection === "LOWER")
       ? `unconfirmed recent signal ${input.recentMarketSignalDirection === "HIGHER" ? "higher" : "lower"} near ${formatUsd(input.recentMarketSignalUsd ?? null)} (context only, not the current price)`
       : null,
@@ -206,6 +210,12 @@ function parseLlmProfile(raw: string): ParsedProfile | null {
   if (!summaryShort || !summaryLong) return null;
   if (summaryShort.length > 500 || summaryLong.length > 1000) return null;
   if (summaryShort.length < 15) return null;
+
+  // Safety net for the {price}-token contract: the model must reference the
+  // current price only as {price} and emit no other dollar figures. If it
+  // leaked a literal "$N", reject → deterministic (tokenized) fallback instead
+  // of serving a baked price that would drift from the live hero.
+  if (/\$\s*\d/.test(summaryShort) || /\$\s*\d/.test(summaryLong)) return null;
 
   return {
     summary_short: summaryShort,
