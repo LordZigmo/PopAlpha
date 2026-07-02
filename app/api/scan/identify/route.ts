@@ -138,9 +138,11 @@ const CONFIDENCE_HIGH_MIN_GAP = 0.04;
 // where rank-2 is naturally close (a Lugia VSTAR scan can sit at
 // 0.91 with Hisuian Zoroark VSTAR at 0.89 — the gap is small but
 // CLIP is right). False-HIGH risk on a genuine reprint with
-// near-identical art is still bounded: those collide at gap≈0
-// AND share metadata, so the picker disambiguation we'd lose is
-// itself low-signal.
+// near-identical art turned out NOT to be bounded in practice
+// (2026-07-01: Surging Sparks Pikachu ex #57 auto-navigated to its
+// ME: Ascended Heroes reprint — wrong set → wrong pricing). That
+// case is now carved out via the reprintNearDupe demotion in
+// classifyConfidence; this floor still applies to everything else.
 const CONFIDENCE_HIGH_ABSOLUTE_FLOOR_COS_DIST = 0.12;
 
 // Phase 1.5 narrow-path promotion (2026-05-08): when Path A or
@@ -505,6 +507,18 @@ function classifyConfidence(
     /// can correct via search. The picker-search flow lands the
     /// correction in scan_eval_images automatically.
     cardNumberFilterDroppedAll: boolean;
+    /// True when rank-1 and rank-2 are different slugs that share the
+    /// same canonical name AND printed collector number with a gap
+    /// below CONFIDENCE_HIGH_MIN_GAP — i.e. a cross-set reprint with
+    /// (near-)identical art, like Surging Sparks Pikachu ex #57 vs.
+    /// ME: Ascended Heroes Pikachu ex #57 (real user report
+    /// 2026-07-01). CLIP cannot tell these apart (their index
+    /// embeddings are effectively the same vector), so rank-1 is a
+    /// coin flip; OCR can't break the tie either because the printed
+    /// number matches both. Auto-navigating would attribute the card
+    /// to the wrong set — a pricing-trust problem, since reprints
+    /// price differently.
+    reprintNearDupe: boolean;
   },
 ): "high" | "medium" | "low" {
   if (topDistance === undefined) return "low";
@@ -512,6 +526,13 @@ function classifyConfidence(
   // rank-2. A tight cluster with ambiguous gap (e.g. Charizard ex vs
   // Charizard V) should fall to medium so the user confirms.
   if (topDistance <= CONFIDENCE_HIGH_COS_DIST) {
+    // Reprint collision (2026-07-01): identical-art cross-set reprints
+    // pass the absolute-floor bypass below at gap≈0, promoting an
+    // arbitrary winner to HIGH. Force the picker instead — both
+    // printings sit in the top matches, so one tap resolves the set.
+    if (context.reprintNearDupe) {
+      return "medium";
+    }
     // OCR/CLIP disagreement (2026-04-30): OCR provided a
     // card_number that no candidate in CLIP's top-K matched. We
     // can't know which signal was wrong, but auto-navigating to
@@ -1544,10 +1565,26 @@ export async function POST(req: Request) {
       clipOriginalTopSlug !== null &&
       matches[0] != null &&
       matches[0].canonical_slug !== clipOriginalTopSlug;
+    // Cross-set reprint with (near-)identical art: same name, same
+    // printed number, negligible visual gap. See the context-field
+    // comment on classifyConfidence. Number equality uses the same
+    // normalizer as the OCR filter so "057" and "57" collide.
+    const top1Number = normalizeCardNumberForCompare(matches[0]?.card_number);
+    const rank2Number = normalizeCardNumberForCompare(rank2?.card_number);
+    const reprintNearDupe =
+      matches[0] != null &&
+      rank2 != null &&
+      topGap !== null &&
+      topGap < CONFIDENCE_HIGH_MIN_GAP &&
+      top1Number !== null &&
+      top1Number === rank2Number &&
+      matches[0].canonical_name.trim().toLowerCase() ===
+        rank2.canonical_name.trim().toLowerCase();
     confidence = classifyConfidence(topDistance, topGap, {
       cardNumberFilterApplied: ocrFilterApplied,
       ocrChangedTop1,
       cardNumberFilterDroppedAll,
+      reprintNearDupe,
     });
   }
 
